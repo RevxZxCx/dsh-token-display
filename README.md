@@ -22,7 +22,10 @@ after each completed step. It is global: once enabled, every conversation gets i
    operation ("已完成思考", "已完成命令", …) a `use N token` label appears, styled to
    match that row, showing the turn's cumulative input+output tokens. One switch
    toggles it.
-5. All options are configurable from the DSH **Plugins → Token 计数器** page.
+5. All options are configurable from four places: **设置 → Token 计数器**
+   (Settings → Token Counter), the same tab under **设置 → 内置插件**, the
+   configuration section on this bundle's page in the **插件 / Plugins** panel,
+   and the card in that panel's **官方 / Official** group.
 
 ## Install
 
@@ -32,7 +35,7 @@ cd packages/dsh-token-counter
 pnpm pack
 
 # 2. install into the desktop profile
-dsh plugin --profile desktop add ./dsh-token-counter-1.0.0.tgz
+dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
 # (or manually: add the tarball to the profile's package.json dependencies and
 #  append "dsh-token-counter" to dsh.profile.bundles, then `pnpm install`)
 
@@ -45,8 +48,15 @@ dsh plugin --profile desktop add ./dsh-token-counter-1.0.0.tgz
 2. While the model is thinking/streaming, the counter appears after the
    "深度思考" indicator and counts up in real time.
 3. When the answer completes, each "已完成…" operation row shows `use N token`.
-4. Open **设置 → 插件 → Token 计数器** to switch merged/split mode and toggle the
-   input / output / per-operation displays.
+4. Open **设置 → Token 计数器** to switch merged/split mode and toggle the
+   input / output / per-operation displays. The same form is also reachable as a
+   tab under **设置 → 内置插件**, as the configuration section on this bundle's
+   page in the **插件 / Plugins** panel ("dsh-token-counter" → 配置), and as the
+   "Token 计数器" card in that panel's "官方 / Official" group.
+   If the settings form reports "This plugin is not loaded, so it cannot be
+   configured right now", the host half is not mounted — run
+   `dsh --profile desktop --dump-config` (or check the profile's
+   `cordis.patch.yml`) before filing an issue.
 
 ## How it works
 

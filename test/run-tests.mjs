@@ -251,9 +251,9 @@ const configForms = {
 };
 
 // ── mock slots + locale ─────────────────────────────────────────────
-let slotRegistration = null;
+const slotRegistrations = [];
 const slots = {
-  inject: (_slotName, registerFn) => { slotRegistration = registerFn(); },
+  inject: (_slotName, registerFn) => { slotRegistrations.push(registerFn()); },
   register: (desc, comp) => ({ ...desc, component: comp })
 };
 const locale = {
@@ -337,9 +337,23 @@ binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start
 flushRaf();
 assert(counterText() === "out 0 token", "step/start resets -> 'out 0 token' (got '" + counterText() + "')");
 
-// 6) settings card registered
-assert(slotRegistration && slotRegistration.name === "plugins.item", "settings card slot registered");
-assert(slotRegistration && slotRegistration.id === "dsh-token-counter", "settings card slot id correct");
+// 6) settings surfaces registered (bundle config page + settings tab + item card)
+const bySlot = (n) => slotRegistrations.find((r) => r && r.name === n);
+const bundle = bySlot("plugins.bundle.config");
+assert(bundle && bundle.key === "dsh-token-counter", "bundle config seat keyed by the package name");
+const tab = bySlot("settings.plugins.tab");
+assert(tab && tab.id === "dsh-token-counter", "Plugins settings section tab registered");
+assert(tab && tab.order > 0 && typeof tab.label === "function", "settings tab has order + label");
+assert(tab && tab.locale === "settings.tokenCounter", "settings tab carries the locale namespace");
+const tabProps = tab && tab.inject();
+assert(tabProps && tabProps.section === true, "settings tab injects section:true");
+assert(tabProps && tabProps.hooks && tabProps.hooks.tokenCounterCard, "settings tab injects the form store");
+const section = bySlot("settings.section");
+assert(section && section.id === "dsh-token-counter", "Settings navigation entry registered");
+assert(section && section.order > 0 && typeof section.label === "function", "settings section has order + label");
+const item = bySlot("plugins.item");
+assert(item && item.id === "dsh-token-counter", "Plugins-page item card registered");
+assert(slotRegistrations.every((r) => r === undefined || typeof r.component === "function"), "every seat renders the card component");
 
 // ── cleanup ─────────────────────────────────────────────────────────
 for (const clean of effects) { try { clean(); } catch (e) {} }

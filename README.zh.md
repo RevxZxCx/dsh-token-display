@@ -14,7 +14,8 @@
 3. **in / out 显示开关（可配置）** —— 独立开关控制输入、输出计数器的显示（默认都打开）。
 4. **每个操作后的 `use N token`（可配置）** —— 每个已完成操作（「已完成思考」「已完成命令」等）
    后面显示 `use N token`，样式与该行文字统一，展示该轮累计的输入+输出 token。一个开关控制其显隐。
-5. 所有选项均可在 DSH 的 **插件 → Token 计数器** 页面配置。
+5. 所有选项共有四个入口：**设置 → Token 计数器**、**设置 → 内置插件** 里的同名标签页、
+   **插件** 面板中本插件页面里的配置区，以及该面板「官方」分组里的「Token 计数器」卡片。
 
 ## 安装
 
@@ -24,7 +25,7 @@ cd packages/dsh-token-counter
 pnpm pack
 
 # 2. 安装到 desktop 配置
-dsh plugin --profile desktop add ./dsh-token-counter-1.0.0.tgz
+dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
 # （或手动：把 tarball 加入配置的 package.json dependencies，
 #   并把 "dsh-token-counter" 追加到 dsh.profile.bundles，然后 `pnpm install`）
 
@@ -36,7 +37,11 @@ dsh plugin --profile desktop add ./dsh-token-counter-1.0.0.tgz
 1. 打开任意对话并发送消息。
 2. 模型思考/输出时，计数器出现在「深度思考」指示器后并实时累加。
 3. 回答完成后，每个「已完成…」操作行后显示 `use N token`。
-4. 打开 **设置 → 插件 → Token 计数器** 切换合并/分开模式，以及输入/输出/每操作显示开关。
+4. 打开 **设置 → Token 计数器** 切换合并/分开模式，以及输入/输出/每操作显示开关。
+   同一份表单还可从 **设置 → 内置插件** 的同名标签页、**插件** 面板中本插件页面里的配置区
+   （「dsh-token-counter」→ 配置），以及该面板「官方」分组里的「Token 计数器」卡片打开。
+   若表单显示「该插件当前未加载，暂时无法配置」，说明宿主端未挂载：请先用
+   `dsh --profile desktop --dump-config`（或查看配置目录的 `cordis.patch.yml`）确认后再提 issue。
 
 ## 实现原理
 
