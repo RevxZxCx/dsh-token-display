@@ -26,10 +26,9 @@ const res = await fetch(url, { redirect: "manual" });
 const buf = Buffer.from(await res.arrayBuffer());
 const text = buf.toString("utf8");
 console.log(`status=${res.status} servedBytes=${buf.byteLength} diskBytes=${st.size} rev=${rev}`);
-console.log("contains makeCounts:", text.includes("makeCounts"));
+console.log("contains buildBadge:", text.includes("buildBadge"));
 console.log("contains data-dsh-token-counter:", text.includes("data-dsh-token-counter"));
-console.log("contains inject=[\"sessions\"]:", text.includes('inject = ["sessions"]'));
+console.log("contains data-dsh-use-token:", text.includes("data-dsh-use-token"));
+console.log('contains inject=["sessions","slots","locale","configForms"]:', text.includes('["sessions", "slots", "locale", "configForms"]'));
+console.log("contains TokenCounterCard:", text.includes("TokenCounterCard"));
 console.log("id line:", text.match(/id: "([^"]+)"/)?.[0]);
-// print the tail to see the module.exports shape
-console.log("--- tail 400 chars ---");
-console.log(text.slice(-400));

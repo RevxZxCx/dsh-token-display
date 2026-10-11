@@ -1,6 +1,12 @@
-// Test harness for the dsh-token-counter client half.
-// Runs the real lib/client.js factory in a mocked browser + sessions service,
-// feeds synthetic assistant/live-chunk deltas, and asserts the counter.
+// Test harness for the dsh-token-counter client half (feature-set rewrite).
+// Runs the real lib/client.js factory in a mocked browser + sessions/configForms
+// service, feeds synthetic assistant/live-chunk deltas, and asserts:
+//   - factory registration + inject list
+//   - live merged-mode output counter (CJK/latin estimation)
+//   - split-mode "in ... · out ..." display
+//   - authoritative settle via assistant/message usage
+//   - per-operation "use N token" totals (input+output) keyed by turn
+//   - settings card controller construction
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -20,45 +26,77 @@ function assert(cond, msg) {
 
 // ── minimal DOM ─────────────────────────────────────────────────────
 function makeElement(tag) {
-  return {
+  const el = {
     tagName: tag.toUpperCase(),
     id: "",
-    textContent: "",
+    _text: "",
     children: [],
     parentNode: null,
-    _style: {},
     attributes: {},
+    get textContent() { return this._text; },
+    set textContent(v) { this._text = String(v); },
+    get className() { return this.attributes["class"] ?? ""; },
+    set className(v) { this.attributes["class"] = String(v); },
     setAttribute(k, v) { this.attributes[k] = String(v); },
     getAttribute(k) { return k in this.attributes ? this.attributes[k] : null; },
     appendChild(child) { child.parentNode = this; this.children.push(child); return child; },
-    querySelector(sel) {
-      const isClass = sel.startsWith(".");
-      const isAttr = sel.startsWith("[") && sel.endsWith("]");
-      const walk = (el) => {
-        for (const c of el.children) {
-          if (isClass) {
-            const cls = (c.getAttribute("class") || "").split(/\s+/);
-            if (cls.includes(sel.slice(1))) return c;
-          } else if (isAttr) {
-            const inner = sel.slice(1, -1);
-            const m = inner.match(/^([\w-]+)=["']?(.*?)["']?$/);
-            if (m && c.getAttribute(m[1]) === m[2]) return c;
-          }
-          const found = walk(c);
-          if (found) return found;
-        }
-        return null;
-      };
-      return walk(this);
-    },
     remove() {
       if (this.parentNode) {
         const i = this.parentNode.children.indexOf(this);
         if (i >= 0) this.parentNode.children.splice(i, 1);
         this.parentNode = null;
       }
+    },
+    querySelector(sel) {
+      return this.querySelectorAll(sel)[0] ?? null;
+    },
+    querySelectorAll(sel) {
+      const out = [];
+      const walk = (el) => {
+        for (const c of el.children) {
+          if (matchSel(c, sel)) out.push(c);
+          walk(c);
+        }
+      };
+      walk(this);
+      return out;
+    },
+    closest(sel) {
+      let p = this;
+      while (p) {
+        if (matchSel(p, sel)) return p;
+        p = p.parentNode;
+      }
+      return null;
     }
   };
+  return el;
+}
+
+function matchSel(el, sel) {
+  // handle compound "tag[attr]" / "tag[attr=val]"
+  let m = sel.match(/^(\w+)\[([^\]]+)\]$/);
+  if (m) {
+    if (el.tagName.toLowerCase() !== m[1].toLowerCase()) return false;
+    return matchAttr(el, "[" + m[2] + "]");
+  }
+  if (sel.startsWith(".")) {
+    const cls = (el.getAttribute("class") || "").split(/\s+/);
+    return cls.includes(sel.slice(1));
+  }
+  if (sel.startsWith("[") && sel.endsWith("]")) {
+    return matchAttr(el, sel);
+  }
+  return el.tagName.toLowerCase() === sel.toLowerCase();
+}
+
+function matchAttr(el, sel) {
+  const inner = sel.slice(1, -1);
+  const m = inner.match(/^([\w-]+)=["']?(.*?)["']?$/);
+  if (m) return el.getAttribute(m[1]) === m[2];
+  const m2 = inner.match(/^([\w-]+)$/);
+  if (m2) return el.getAttribute(m2[1]) !== null;
+  return false;
 }
 
 // The running indicator: div[data-chat-running] > span.xz4KEq_runningContent
@@ -68,28 +106,79 @@ const running = makeElement("div");
 running.setAttribute("data-chat-running", "true");
 running.appendChild(runningContent);
 
-const styleStore = new Map(); // id -> element
-const head = makeElement("head");
+// A closed process group: div[data-chat-turn=1] > button[data-process-activity]
+const processBtn = makeElement("button");
+processBtn.setAttribute("data-process-activity", "thinking");
+const processGroup = makeElement("div");
+processGroup.setAttribute("data-chat-turn", "1");
+processGroup.appendChild(processBtn);
 
+const styleStore = new Map();
 const document = {
   getElementById(id) { return styleStore.get(id) ?? null; },
-  createElement(tag) { return makeElement(tag); },
+  createElement(tag) { const e = makeElement(tag); return e; },
   querySelector(sel) {
     if (sel === "[data-chat-running]") return running;
     return null;
   },
-  head: { appendChild(el) { head.appendChild(el); } }
+  querySelectorAll(sel) {
+    const out = [];
+    const walk = (el) => {
+      for (const c of el.children) {
+        if (matchSel(c, sel)) out.push(c);
+        walk(c);
+      }
+    };
+    walk(running); walk(processGroup);
+    // "button[data-process-activity]" matches processBtn via descendant walk
+    return out;
+  },
+  head: { appendChild(el) { /* style element; track by id */ if (el.id) styleStore.set(el.id, el); } }
 };
 
 // ── window globals ──────────────────────────────────────────────────
 let rafQueue = [];
+let intervalCb = null;
 const window = {
-  setInterval: () => 1,
-  clearInterval: () => {}
+  setInterval: (cb) => { intervalCb = cb; return 1; },
+  clearInterval: () => { intervalCb = null; }
 };
-// The plugin uses BARE setTimeout/clearTimeout (globals), so inject them too.
 const sandboxSetTimeout = (fn) => { rafQueue.push(fn); return rafQueue.length; };
 const sandboxClearTimeout = () => {};
+
+// ── react + primitives mocks ────────────────────────────────────────
+const jsx = (type, props, ...rest) => ({ type, props, children: rest });
+const jsxs = (type, props) => ({ type, props, children: props && props.children });
+
+function mockSettingsFormModel() {
+  return class SettingsFormModel {
+    constructor(scope, specs) { this.scope = scope; this.specs = specs; this._listeners = []; }
+    bind(project) {
+      const store = {
+        getSnapshot: () => project(),
+        subscribe: (fn) => { this._listeners.push(fn); return () => {}; }
+      };
+      return store;
+    }
+    shell() { return { available: true, writable: true, dirty: false, invalid: false, saving: false, failed: false }; }
+    field(f) {
+      const spec = this.specs.find((s) => s.field === f);
+      const v = this.scope.getSnapshot().value?.[f];
+      return { text: spec ? spec.format(v) : String(v), overridden: false, invalid: false };
+    }
+    actions() { return { edit: () => {}, resetField: () => {}, save: async () => {}, discard: () => {} }; }
+    dispose() {}
+  };
+}
+
+const primitivesMock = {
+  SettingsForm: () => null,
+  SettingsFormModel: mockSettingsFormModel(),
+  SegmentedControl: () => null,
+  Switch: () => null,
+  TextShimmer: () => null,
+  Checkbox: () => null
+};
 
 // ── load the factory ────────────────────────────────────────────────
 let registration = null;
@@ -108,12 +197,17 @@ vmRun(clientSrc);
 
 assert(registration && registration.id === "dsh-token-counter", "factory registered with id dsh-token-counter");
 
-const factoryRequire = () => {
-  throw new Error("require not expected in test");
+const factoryRequire = (name) => {
+  if (name === "react/jsx-runtime") return { jsx, jsxs, Fragment: Symbol("Fragment") };
+  if (name === "react") return { createElement: () => null, memo: (x) => x, useState: () => [null, () => {}], useCallback: (fn) => fn, useRef: () => ({ current: null }), useEffect: () => {} };
+  if (name === "@deepseek-ai/dsh-client-ui-primitives") return primitivesMock;
+  throw new Error("unexpected require: " + name);
 };
 const mod = registration.factory(factoryRequire);
 assert(typeof mod.apply === "function", "exports.apply is a function");
 assert(Array.isArray(mod.inject) && mod.inject.includes("sessions"), "exports.inject includes sessions");
+assert(mod.inject.includes("slots") && mod.inject.includes("configForms") && mod.inject.includes("locale"),
+  "exports.inject includes slots/configForms/locale");
 
 // ── mock sessions service ───────────────────────────────────────────
 function makeBinding() {
@@ -122,7 +216,6 @@ function makeBinding() {
   const eventSource = {
     subscribe(fn) { listener = fn; return () => { listener = null; }; },
     getSnapshot() { return snapshot; },
-    // test helpers
     _emit(kind, entries) {
       snapshot = { entries, change: { kind, entries } };
       if (listener) listener();
@@ -132,9 +225,7 @@ function makeBinding() {
 }
 
 let listListener = null;
-const byId = {
-  s1: { id: "s1", retainedBy: { mainView: 1 } }
-};
+const byId = { s1: { id: "s1", retainedBy: { mainView: 1 } } };
 const list = {
   getSnapshot() { return { ids: Object.keys(byId), byId }; },
   subscribe(fn) { listListener = fn; return () => { listListener = null; }; }
@@ -145,15 +236,46 @@ const sessions = {
   binding: (id) => (id === "s1" ? binding : undefined)
 };
 
-let effectCleanup = null;
+// ── mock configForms service ────────────────────────────────────────
+let cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+let cfgListener = null;
+const cfgScope = {
+  getSnapshot() { return { status: "ready", writable: true, value: cfgValue, base: {}, user: {}, revision: 1 }; },
+  subscribe(fn) { cfgListener = fn; return () => { cfgListener = null; }; },
+  mutate: async () => true
+};
+const configForms = {
+  get: () => cfgScope,
+  whileServed: (_ns, cb) => cb(new Set(_ns)),
+  developerTools: { enabled: { getSnapshot: () => false } }
+};
+
+// ── mock slots + locale ─────────────────────────────────────────────
+let slotRegistration = null;
+const slots = {
+  inject: (_slotName, registerFn) => { slotRegistration = registerFn(); },
+  register: (desc, comp) => ({ ...desc, component: comp })
+};
+const locale = {
+  bind: () => (k) => k,
+  register: () => {}
+};
+
+const effects = [];
 const ctx = {
-  get(name) { return name === "sessions" ? sessions : undefined; },
-  effect(fn) { effectCleanup = fn(); }
+  get(name) {
+    if (name === "sessions") return sessions;
+    if (name === "configForms") return configForms;
+    if (name === "slots") return slots;
+    if (name === "locale") return locale;
+    return undefined;
+  },
+  effect(fn) { const cleanup = fn(); effects.push(cleanup); }
 };
 
 // ── run apply ───────────────────────────────────────────────────────
 mod.apply(ctx);
-assert(effectCleanup !== null, "apply registered a ctx.effect cleanup");
+assert(effects.length >= 2, "apply registered ctx.effect cleanups");
 
 function flushRaf() {
   while (rafQueue.length) {
@@ -162,38 +284,65 @@ function flushRaf() {
     for (const fn of q) fn();
   }
 }
+function runPoll() {
+  if (intervalCb) intervalCb();
+  flushRaf();
+}
 
 function counterText() {
   const span = runningContent.children.find((c) => c.getAttribute("data-dsh-token-counter") === "true");
+  if (!span) return null;
+  return span.children[0] ? span.children[0].textContent : null;
+}
+function useTokenText() {
+  const span = processBtn.children.find((c) => c.getAttribute("data-dsh-use-token") === "true");
   return span ? span.textContent : null;
 }
 
 // ── feed synthetic deltas ───────────────────────────────────────────
 const chunk = (type, text) => ({ type, text });
 
+// 1) merged mode: live output counter
 binding.eventSource._emit("replace", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("text-delta", "你好") } } }]);
 flushRaf();
-assert(runningContent.children.some((c) => c.getAttribute("data-dsh-token-counter") === "true"),
-  "counter span injected into runningContent (lazily, on first sync)");
-assert(counterText() === "2 token", "2 CJK chars -> '2 token' (got '" + counterText() + "')");
+assert(counterText() === "out 2 token", "merged: 2 CJK -> 'out 2 token' (got '" + counterText() + "')");
 
 binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("text-delta", "hello world") } } }]);
 flushRaf();
-// "hello world" = 10 latin chars + 1 space(skipped) => round(10/4)=3; total 2+3=5
-assert(counterText() === "5 token", "CJK + latin accumulate -> '5 token' (got '" + counterText() + "')");
+assert(counterText() === "out 5 token", "merged: +latin -> 'out 5 token' (got '" + counterText() + "')");
 
-binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("reasoning-delta", "思考过程") } } }]);
+// 2) authoritative settle via assistant/message
+binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 1, step: 0, usage: { inputTokens: 100, outputTokens: 42 } } } }]);
 flushRaf();
-// +4 CJK => 2+4=6 CJK, 10 latin => 6 + round(10/4)=6+3=9
-assert(counterText() === "9 token", "reasoning-delta accumulates -> '9 token' (got '" + counterText() + "')");
+assert(counterText() === "out 42 token", "settle snaps to authoritative output -> 'out 42 token' (got '" + counterText() + "')");
+runPoll();
+assert(useTokenText() === "use 142 token", "per-op total = input+output -> 'use 142 token' (got '" + useTokenText() + "')");
 
-// step/start resets
+// 3) split mode
+cfgValue = { displayMode: "split", showInput: true, showOutput: true, showPerOp: true };
+if (cfgListener) cfgListener();
+flushRaf();
+assert(counterText() === "in 100 token · out 42 token", "split: 'in 100 token · out 42 token' (got '" + counterText() + "')");
+
+// 4) showOutput off (split) -> input only
+cfgValue = { displayMode: "split", showInput: true, showOutput: false, showPerOp: true };
+if (cfgListener) cfgListener();
+flushRaf();
+assert(counterText() === "in 100 token", "split + showOutput off -> 'in 100 token' (got '" + counterText() + "')");
+
+// 5) step/start resets (back to merged)
+cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+if (cfgListener) cfgListener();
 binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
 flushRaf();
-assert(counterText() === "0 token", "step/start resets -> '0 token' (got '" + counterText() + "')");
+assert(counterText() === "out 0 token", "step/start resets -> 'out 0 token' (got '" + counterText() + "')");
+
+// 6) settings card registered
+assert(slotRegistration && slotRegistration.name === "plugins.item", "settings card slot registered");
+assert(slotRegistration && slotRegistration.id === "dsh-token-counter", "settings card slot id correct");
 
 // ── cleanup ─────────────────────────────────────────────────────────
-effectCleanup();
+for (const clean of effects) { try { clean(); } catch (e) {} }
 const spanAfterCleanup = runningContent.children.find((c) => c.getAttribute("data-dsh-token-counter") === "true");
 assert(spanAfterCleanup === undefined, "cleanup removes the counter span");
 
