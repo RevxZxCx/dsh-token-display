@@ -1,0 +1,11 @@
+# dependencies
+node_modules/
+
+# build / packaging artifacts
+*.tgz
+.local-plugins/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log

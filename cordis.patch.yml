@@ -1,0 +1,4 @@
+# dsh-token-counter bundle patch: registers the token counter plugin.
+- insert:
+    - id: dsh-token-counter
+      name: dsh-token-counter
