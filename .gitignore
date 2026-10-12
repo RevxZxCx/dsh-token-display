@@ -9,3 +9,6 @@ node_modules/
 .DS_Store
 Thumbs.db
 *.log
+
+# local-only review archives; never commit (scoped so real docs stay addable)
+/docs/review-*.md

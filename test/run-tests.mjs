@@ -162,9 +162,13 @@ const document = {
 // ── window globals ──────────────────────────────────────────────────
 let rafQueue = [];
 let intervalCb = null;
+// Interval registry the hook runner drives by id, so several timers can be
+// live at once and each can be ticked or cleared explicitly.
+let intervalSeq = 0;
+const intervals = new Map();
 const window = {
-  setInterval: (cb) => { intervalCb = cb; return 1; },
-  clearInterval: () => { intervalCb = null; }
+  setInterval: (cb) => { intervalCb = cb; intervals.set(++intervalSeq, cb); return intervalSeq; },
+  clearInterval: (id) => { intervals.delete(id); if (id === 1) intervalCb = null; }
 };
 const sandboxSetTimeout = (fn) => { rafQueue.push(fn); return rafQueue.length; };
 const sandboxClearTimeout = () => {};
@@ -177,18 +181,31 @@ const sandboxClearTimeout = () => {};
 // extra arguments into a children list.
 const jsx = (type, props, key) => (key === undefined ? { type, props } : { type, props, key });
 const jsxs = jsx;
-// Minimal hook fakes: enough for the preview card's hover animation to run
-// inside assertions (state + effect + a manually driven interval).
+// Minimal hook fakes: enough to MOUNT ModePreviewCard and drive its hover
+// animation. Effect semantics mirror React: the create function runs (and the
+// previous cleanup first) only when the deps array changes; slots persist
+// across renders. Intervals are id-addressable through the window mock, so a
+// test can tick the card's own timer without disturbing the live engine's.
+function depsChanged(prev, next) {
+  if (prev === undefined || next === undefined) return true;
+  if (prev.length !== next.length) return true;
+  return next.some((value, i) => !Object.is(value, prev[i]));
+}
 function makeHookRunner() {
   const slots = [];
+  const effects = [];
   let cursor = 0;
-  let cleanups = [];
-  const runner = {
+  return {
     render(fn, props) {
       cursor = 0;
       const result = fn(props);
-      cleanups.forEach((c) => c());
-      cleanups = [];
+      for (const slot of effects) {
+        if (slot !== undefined && slot.pending) {
+          slot.pending = false;
+          if (slot.cleanup) slot.cleanup();
+          slot.cleanup = slot.create() || null;
+        }
+      }
       return result;
     },
     useState(initial) {
@@ -202,13 +219,19 @@ function makeHookRunner() {
       if (!(i in slots)) slots[i] = { current: initial };
       return slots[i];
     },
-    useEffect(fn) {
-      // run once per render; capture cleanup
-      cleanups.push(fn() || (() => {}));
+    useEffect(create, deps) {
+      const i = cursor++;
+      const slot = effects[i];
+      if (slot === undefined) effects[i] = { deps, create, pending: true, cleanup: null };
+      else if (depsChanged(slot.deps, deps)) { slot.deps = deps; slot.create = create; slot.pending = true; }
+      else slot.deps = deps;
     },
-    setSlot(i, v) { slots[i] = v; },
+    unmount() {
+      for (const slot of effects) if (slot !== undefined && slot.cleanup) slot.cleanup();
+      effects.length = 0;
+      slots.length = 0;
+    },
   };
-  return runner;
 }
 
 function mockSettingsFormModel() {
@@ -267,7 +290,7 @@ const factoryRequire = (name) => {
     // real state + effects; default no-ops keep apply()-level tests unaffected.
     useState: (i) => (activeHooks ? activeHooks.useState(i) : [i, () => {}]),
     useRef: (i) => (activeHooks ? activeHooks.useRef(i) : { current: i }),
-    useEffect: (fn) => { if (activeHooks) activeHooks.useEffect(fn); },
+    useEffect: (fn, deps) => { if (activeHooks) activeHooks.useEffect(fn, deps); },
   };
   if (name === "@deepseek-ai/dsh-client-ui-primitives") return primitivesMock;
   throw new Error("unexpected require: " + name);
@@ -357,6 +380,9 @@ const ctx = {
 
 // ── run apply ───────────────────────────────────────────────────────
 mod.apply(ctx);
+// The live engine's 400ms poll registered with id 1; freeze it now so preview
+// timers registered later can never shadow it in runPoll().
+const livePollCb = intervalCb;
 assert(effects.length >= 2, "apply registered ctx.effect cleanups");
 
 function flushRaf() {
@@ -367,7 +393,7 @@ function flushRaf() {
   }
 }
 function runPoll() {
-  if (intervalCb) intervalCb();
+  if (livePollCb) livePollCb();
   flushRaf();
 }
 
@@ -500,6 +526,30 @@ assert(counterText() === "in 6100 token · out 1 token", "split during output ke
   assert(styleStore.get("dsh-token-counter-style").textContent.includes("dsh-token-counter-highlight"), "counter-moving keyframes shipped");
   assert(styleStore.get("dsh-token-counter-style").textContent.includes("--dsw-alias-label-shimmer"), "highlight color inherits the row's shimmer variable");
   assert(styleStore.get("dsh-token-counter-style").textContent.includes("font:inherit"), "badge inherits the running row's font");
+  {
+    const css = styleStore.get("dsh-token-counter-style").textContent;
+    assert(css.includes(".dtc-headTitle{margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);}"),
+      "preview head follows the theme (readable on dark hosts)");
+    assert(css.includes(".dtc-switches .dtc-headTitle{color:#1f2328;}"),
+      "switches heading keeps fixed dark ink on its light panel (no theme bleed-through)");
+    assert(css.includes(".dtc-cardStatic:not(.dtc-cardOn):hover{"),
+      "read-only hover reset spares the selected card (blue highlight survives hover)");
+    assert(!css.includes(".dtc-cardStatic:hover{"),
+      "no unscoped static-hover reset left to erase dtc-cardOn");
+    // The specificity trap the second review caught: the GENERIC hover lift
+    // also out-ranked .dtc-cardOn (0,1,0), so it must be scoped away from the
+    // selected card too — a string check on the new selector alone was blind.
+    assert(css.includes(".dtc-card:not(.dtc-cardOn):hover{"),
+      "hover lift is scoped to unselected cards (selected keeps its ring on hover)");
+    assert(!/\.dtc-card:hover\{/.test(css),
+      "no unscoped .dtc-card:hover rule that could erase the selection ring");
+    // The ring must beat the baseline border by specificity, not source order:
+    // compound .dtc-card.dtc-cardOn (0,2,0) > .dtc-card (0,1,0) either way.
+    assert(css.includes(".dtc-card.dtc-cardOn{"),
+      "selection ring is specificity-secured (survives rule reordering)");
+    assert(!/[^.\w-]\.dtc-cardOn\{/.test(css),
+      "no bare .dtc-cardOn rule that would depend on source order");
+  }
 }
 
 // 5f) per-OPERATION attribution: two completed operations in ONE reply must show
@@ -670,8 +720,8 @@ assert(rowKids[0].props.children === "showInput" && rowKids[1].type === primitiv
   "switch row carries a visible caption plus the platform switch");
 
 // ── 7d) preview state machine (pure logic behind the hover animation) ─
+const P = mod.preview;
 {
-  const P = mod.preview;
   // merged: in climbs to its cap, pauses, then out climbs to ITS cap, then done.
   let f = P.startFrame(true, true);
   const samples = [];   // [phaseBeforeTick, value] — the switch tick still counts as "in"
@@ -717,6 +767,115 @@ assert(rowKids[0].props.children === "showInput" && rowKids[1].type === primitiv
   const idle = P.badgeText("split", P.idleFrame("split", true, true), true, true);
   assert(idle === "in " + P.FAKE_IN + " token · out " + P.FAKE_OUT + " token", "idle card shows complete fake counts (got '" + idle + "')");
   assert(P.startFrame(false, false) === null, "both switches off -> nothing to animate");
+}
+
+// ── 7e) MODEPREVIEWCARD mounted: the component itself, through the hook ──
+// runner, with real interval driving. This executes the timer start/restart/
+// cleanup paths the pure-function tests cannot reach.
+{
+  const P = mod.preview;
+  cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+  if (cfgListener) cfgListener();
+  const tree = renderCard(bySlot("settings.section"), { view: "page" });
+  const layout = childrenOf(childrenOf(tree)[2]);        // form body = dtc-layout div
+  const previewsEl = childrenOf(layout)[0];              // first section = previews
+  const cardsEl = childrenOf(previewsEl)[1];             // head, then cards grid
+  const mergedCard = childrenOf(cardsEl)[0];
+  const Card = mergedCard.type;
+  const baseProps = { ...mergedCard.props, onSelect: (v) => edits.push(["mounted", v]) };
+
+  const runner = makeHookRunner();
+  activeHooks = runner;
+  const findBadge = (node) => {
+    if (!node || typeof node !== "object") return null;
+    if (node.props && node.props["data-dsh-token-counter"] === "true") return node;
+    const kids = node.props && node.props.children;
+    const list = Array.isArray(kids) ? kids : [kids];
+    for (const k of list) { const hit = findBadge(k); if (hit) return hit; }
+    return null;
+  };
+  // Badge layers: children[0] is the static content span holding the text.
+  const badgeTextOf = (el) => (el && el.props.children[0] && el.props.children[0].props.children);
+  const findOpRow = (node) => {
+    if (!node || typeof node !== "object") return null;
+    if (node.props && node.props.className === "dtc-opRow") return node;
+    const kids = node.props && node.props.children;
+    const list = Array.isArray(kids) ? kids : [kids];
+    for (const k of list) { const hit = findOpRow(k); if (hit) return hit; }
+    return null;
+  };
+  // Events set state through effects; React would re-render after the effect
+  // commits, so render twice to observe state an effect just wrote.
+  const draw = (props) => { runner.render(Card, props); return runner.render(Card, props); };
+
+  // Mount (no hover): idle merged badge shows the static out figure, no live
+  // shimmer layers, and the op row is present.
+  let rendered = draw(baseProps);
+  let badge = findBadge(rendered);
+  assert(badge && badgeTextOf(badge) === "out " + P.FAKE_OUT + " token", "mounted idle card shows static out figure (got '" + badgeTextOf(badge) + "')");
+  assert(badge.props["data-dtc-live"] === "false", "idle card is not live");
+  assert(findOpRow(rendered) !== null, "mounted card includes the use-token operation row");
+
+  // Hover: the climb starts from zero and advances on each timer tick.
+  rendered.props.onMouseEnter();
+  rendered = draw(baseProps);
+  badge = findBadge(rendered);
+  const timerId = Math.max(...intervals.keys());
+  assert(timerId > 1, "the hover animation registered its own interval (the live poll is id 1)");
+  assert(badge.props["data-dtc-live"] === "true", "hover marks the card live");
+  assert(badgeTextOf(badge) === "in 0 token", "hover frame starts the in climb at 0 (got '" + badgeTextOf(badge) + "')");
+  intervals.get(timerId)();
+  rendered = draw(baseProps);
+  const climbed = badgeTextOf(findBadge(rendered));
+  assert(/^in \d+ token$/.test(climbed) && climbed !== "in 0 token", "timer tick advances the in climb (got '" + climbed + "')");
+
+  // Flipping showPerOp re-renders but MUST NOT restart the animation (it is
+  // deliberately absent from the effect deps).
+  intervals.get(timerId)();
+  draw(baseProps);
+  const idsBefore = intervals.size;
+  const beforeProps = { ...baseProps, showPerOp: false };
+  rendered = draw(beforeProps);
+  assert(findOpRow(rendered) === null, "showPerOp off removes the operation row");
+  assert(intervals.size === idsBefore, "per-op toggle registered no new interval (no restart)");
+  intervals.get(timerId)();
+  rendered = draw(beforeProps);
+  assert(/^in \d+ token$/.test(badgeTextOf(findBadge(rendered))), "in climb continues after per-op toggle (got '" + badgeTextOf(findBadge(rendered)) + "')");
+
+  // Leave: timer cleaned, back to the idle figure.
+  rendered.props.onMouseLeave();
+  rendered = draw(beforeProps);
+  badge = findBadge(rendered);
+  assert(badge.props["data-dtc-live"] === "false" && badgeTextOf(badge) === "out " + P.FAKE_OUT + " token", "leaving returns to the static idle figure");
+
+  // Keyboard activation prevents default (space would otherwise scroll) and
+  // selects the mode.
+  let prevented = 0;
+  rendered.props.onKeyDown({ key: " ", preventDefault: () => { prevented += 1; } });
+  assert(prevented === 1, "space keydown calls preventDefault");
+  assert(edits.some(([f, v]) => f === "mounted" && v === "merged"), "space activates the card");
+
+  // Unmount clears the card timer: hover again so a timer IS live, then unmount.
+  rendered.props.onMouseEnter();
+  draw(beforeProps);
+  const timerId2 = Math.max(...intervals.keys());
+  assert(timerId2 > 1 && intervals.has(timerId2), "re-hover registers a fresh timer");
+  runner.unmount();
+  assert(!intervals.has(timerId2), "unmount clears the card timer");
+
+  // Disabled card: not focusable, no click handler, hover does not animate.
+  activeHooks = null;
+  const disabledProps = { ...baseProps, disabled: true };
+  const runner2 = makeHookRunner();
+  activeHooks = runner2;
+  const staticRender = runner2.render(Card, disabledProps);
+  assert(staticRender.props.tabIndex === -1, "disabled card is out of the tab order");
+  assert(staticRender.props.onKeyDown === undefined && staticRender.props.onClick === undefined, "disabled card has no click/key handlers");
+  staticRender.props.onMouseEnter();
+  badge = findBadge(runner2.render(Card, disabledProps));
+  assert(badge.props["data-dtc-live"] === "false", "disabled card never animates on hover");
+  runner2.unmount();
+  activeHooks = null;
 }
 
 const summaryEl = renderCard(sectionEntry, { view: "summary" });
