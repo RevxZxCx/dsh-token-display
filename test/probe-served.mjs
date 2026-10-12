@@ -37,4 +37,6 @@ console.log("platform shimmer geometry (1.3.2):", text.includes("dsh-token-count
 console.log("counter-moving keyframes (1.3.2):", text.includes("@keyframes dsh-token-counter-highlight"));
 console.log("inherits row shimmer color (1.3.2):", text.includes("--dsw-alias-label-shimmer"));
 console.log("reads contextPressure projection (1.3.2):", text.includes("contextPressure"));
+console.log("per-step usage records (1.3.5):", text.includes("recordStep") && text.includes("stepRecords"));
+console.log("no turn-level accumulator (1.3.5):", !text.includes("turnUsage"));
 console.log("id line:", text.match(/id: "([^"]+)"/)?.[0]);

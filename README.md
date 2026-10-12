@@ -27,8 +27,9 @@ after each completed step. It is global: once enabled, every conversation gets i
    the input and output counters (both on by default).
 4. **Per-operation "use N token" (configurable)** — after each completed
    operation ("已完成思考", "已完成命令", …) a `use N token` label appears, styled to
-   match that row, showing the turn's cumulative input+output tokens. One switch
-   toggles it.
+   match that row, showing the tokens **that operation's own step** consumed
+   (input + output, or the provider's `totalTokens` when it reports one) — never
+   the whole reply's total. One switch toggles it.
 5. All options are configurable from four places: **设置 → Token 计数器**
    (Settings → Token Counter), the same tab under **设置 → 内置插件**, the
    configuration section on this bundle's page in the **插件 / Plugins** panel,
@@ -54,7 +55,8 @@ dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
 1. Open any conversation and send a message.
 2. While the model is thinking/streaming, the counter appears after the
    "深度思考" indicator and counts up in real time.
-3. When the answer completes, each "已完成…" operation row shows `use N token`.
+3. When the answer completes, each "已完成…" operation row shows `use N token`
+   for that operation's own step.
 4. Open **设置 → Token 计数器** to switch merged/split mode and toggle the
    input / output / per-operation displays. The same form is also reachable as a
    tab under **设置 → 内置插件**, as the configuration section on this bundle's
@@ -69,10 +71,13 @@ dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
 
 - The browser half subscribes to the DSH client `sessions` service and the active
   (main-view) session's `binding.eventSource`.
-- It counts `text-delta` / `reasoning-delta` stream chunks as they arrive and
-  reads authoritative `usage` from the `usage` chunk / `assistant/message` event.
-- It injects a DOM badge into the running indicator (there is no slot around it),
-  and `use N token` labels into closed process-group headers.
+- It counts `text-delta` / `reasoning-delta` stream chunks as they arrive, reads
+  the live input count from the harness's `contextPressure` projection, and
+  records authoritative `usage` per step from the `usage` chunk /
+  `assistant/message` event (keyed by turn + step).
+- It injects a DOM badge into the running indicator (there is no slot around it).
+  Each completed operation row is one step, so rows walked in document order
+  claim the next settled step of their turn and show that step's own tokens.
 
 ## Package layout
 

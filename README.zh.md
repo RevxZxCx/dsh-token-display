@@ -14,7 +14,8 @@
    - 分开模式：整轮始终同时显示 `in … · out …`。
 3. **in / out 显示开关（可配置）** —— 独立开关控制输入、输出计数器的显示（默认都打开）。
 4. **每个操作后的 `use N token`（可配置）** —— 每个已完成操作（「已完成思考」「已完成命令」等）
-   后面显示 `use N token`，样式与该行文字统一，展示该轮累计的输入+输出 token。一个开关控制其显隐。
+   后面显示 `use N token`，样式与该行文字统一，展示**该操作自身那一步**消耗的 token
+   （输入+输出，若供应商上报了 `totalTokens` 则以其为准），绝不是一整条回复的累计值。一个开关控制其显隐。
 5. 所有选项共有四个入口：**设置 → Token 计数器**、**设置 → 内置插件** 里的同名标签页、
    **插件** 面板中本插件页面里的配置区，以及该面板「官方」分组里的「Token 计数器」卡片。
 
@@ -37,7 +38,7 @@ dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
 
 1. 打开任意对话并发送消息。
 2. 模型思考/输出时，计数器出现在「深度思考」指示器后并实时累加。
-3. 回答完成后，每个「已完成…」操作行后显示 `use N token`。
+3. 回答完成后，每个「已完成…」操作行后显示 `use N token`（该行自己那一步的用量）。
 4. 打开 **设置 → Token 计数器** 切换合并/分开模式，以及输入/输出/每操作显示开关。
    同一份表单还可从 **设置 → 内置插件** 的同名标签页、**插件** 面板中本插件页面里的配置区
    （「dsh-token-counter」→ 配置），以及该面板「官方」分组里的「Token 计数器」卡片打开。
@@ -47,8 +48,8 @@ dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
 ## 实现原理
 
 - 浏览器端订阅 DSH 客户端 `sessions` 服务，以及当前（主视图）会话的 `binding.eventSource`。
-- 实时统计 `text-delta` / `reasoning-delta` 流式分片，并从 `usage` 分片 / `assistant/message` 事件读取权威 usage。
-- 通过 DOM 向运行指示器注入徽标（该处没有 slot），并向已闭合的流程组标题注入 `use N token` 标签。
+- 实时统计 `text-delta` / `reasoning-delta` 流式分片，输入数字读宿主的 `contextPressure` 投影，权威 usage 来自 `usage` 分片 / `assistant/message` 事件（按 turn + step 记录）。
+- 通过 DOM 向运行指示器注入徽标（该处没有 slot）；每个已完成的操作行按文档顺序认领其对应步骤的用量，因此显示的是该操作自己的 token 数。
 
 ## 包结构
 

@@ -115,6 +115,26 @@ const processGroup = makeElement("div");
 processGroup.setAttribute("data-chat-turn", "1");
 processGroup.appendChild(processBtn);
 
+// A second reply with TWO completed operations and one still streaming, so the
+// per-operation attribution can be proven: the two rows must differ.
+const turn2 = makeElement("div");
+turn2.setAttribute("data-chat-turn", "2");
+const rowA = makeElement("button");
+rowA.setAttribute("data-process-activity", "thinking");
+const rowB = makeElement("button");
+rowB.setAttribute("data-process-activity", "tools");
+const rowLive = makeElement("button");
+rowLive.setAttribute("data-process-activity", "tools");
+const liveShimmer = makeElement("span");
+liveShimmer.setAttribute("data-shimmer", "true");
+rowLive.appendChild(liveShimmer);
+turn2.appendChild(rowA);
+turn2.appendChild(rowB);
+turn2.appendChild(rowLive);
+
+// Extra roots a test can attach later (simulating new transcript rows appearing).
+const documentWalkTargets = [];
+
 const styleStore = new Map();
 const document = {
   getElementById(id) { return styleStore.get(id) ?? null; },
@@ -131,7 +151,8 @@ const document = {
         walk(c);
       }
     };
-    walk(running); walk(processGroup);
+    walk(running); walk(processGroup); walk(turn2);
+    for (const extra of documentWalkTargets) walk(extra);
     // "button[data-process-activity]" matches processBtn via descendant walk
     return out;
   },
@@ -320,6 +341,10 @@ function useTokenText() {
   const span = processBtn.children.find((c) => c.getAttribute("data-dsh-use-token") === "true");
   return span ? span.textContent : null;
 }
+function useTokenOf(btn) {
+  const span = btn.children.find((c) => c.getAttribute("data-dsh-use-token") === "true");
+  return span ? span.textContent : null;
+}
 
 // ── feed synthetic deltas ───────────────────────────────────────────
 const chunk = (type, text) => ({ type, text });
@@ -433,6 +458,70 @@ assert(counterText() === "in 6100 token · out 1 token", "split during output ke
   assert(styleStore.get("dsh-token-counter-style").textContent.includes("dsh-token-counter-highlight"), "counter-moving keyframes shipped");
   assert(styleStore.get("dsh-token-counter-style").textContent.includes("--dsw-alias-label-shimmer"), "highlight color inherits the row's shimmer variable");
   assert(styleStore.get("dsh-token-counter-style").textContent.includes("font:inherit"), "badge inherits the running row's font");
+}
+
+// 5f) per-OPERATION attribution: two completed operations in ONE reply must show
+// their OWN steps' usage, never the same whole-reply total (the old bug).
+{
+  cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+  if (cfgListener) cfgListener();
+
+  // Step 0 of turn 2 settles while rowA is the open row.
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 2, step: 0, usage: { inputTokens: 1000, outputTokens: 20 } } } }]);
+  runPoll();
+  assert(useTokenOf(rowA) === "use 1020 token", "rowA shows its own step (1000+20) (got '" + useTokenOf(rowA) + "')");
+  assert(useTokenOf(rowB) === null, "rowB has no number before its step settles (got '" + useTokenOf(rowB) + "')");
+  assert(useTokenOf(rowLive) === null, "the streaming row shows nothing");
+
+  // Step 1 settles; rowB is now closed and takes the NEXT step, not the running total.
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 2, step: 1, usage: { inputTokens: 1200, outputTokens: 30 } } } }]);
+  runPoll();
+  assert(useTokenOf(rowB) === "use 1230 token", "rowB shows its own step (1200+30), not the reply total (got '" + useTokenOf(rowB) + "')");
+  assert(useTokenOf(rowA) === "use 1020 token", "rowA keeps its own figure after a later step lands");
+  assert(useTokenOf(rowA) !== useTokenOf(rowB), "the two operations show DIFFERENT numbers");
+
+  // A re-settled step replaces its figure rather than accumulating.
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 2, step: 1, usage: { inputTokens: 1200, outputTokens: 50 } } } }]);
+  runPoll();
+  assert(useTokenOf(rowB) === "use 1250 token", "re-settled step re-prices, never double counts (got '" + useTokenOf(rowB) + "')");
+
+  // totalTokens wins when the provider reports it, and a row only earns its
+  // number once it closes.
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 2, step: 2, usage: { inputTokens: 900, outputTokens: 5, totalTokens: 905 } } } }]);
+  runPoll();
+  assert(useTokenOf(rowLive) === null, "still-streaming row stays unnumbered even after its step settles");
+  liveShimmer.remove();
+  runPoll();
+  assert(useTokenOf(rowLive) === "use 905 token", "closing the row paints its own step, preferring totalTokens (got '" + useTokenOf(rowLive) + "')");
+}
+
+// 5g) reload: a `replace` snapshot replays the whole loaded history at once, so
+// every row must be numbered from ITS OWN step even though nothing settled live.
+{
+  const turn5 = makeElement("div");
+  turn5.setAttribute("data-chat-turn", "5");
+  const r5a = makeElement("button");
+  r5a.setAttribute("data-process-activity", "thinking");
+  const r5b = makeElement("button");
+  r5b.setAttribute("data-process-activity", "tools");
+  turn5.appendChild(r5a);
+  turn5.appendChild(r5b);
+
+  const message = (turn, step, inputTokens, outputTokens) => ({
+    type: "event",
+    event: { type: "assistant/message", data: { turn, step, usage: { inputTokens, outputTokens } } },
+  });
+
+  // Attach the replayed history to the document, then emit one replace frame.
+  documentWalkTargets.push(turn5);
+  binding.eventSource._emit("replace", [
+    message(5, 0, 2000, 40),
+    message(5, 1, 2400, 60),
+  ]);
+  runPoll();
+  assert(useTokenOf(r5a) === "use 2040 token", "reload: first row numbers its own step (got '" + useTokenOf(r5a) + "')");
+  assert(useTokenOf(r5b) === "use 2460 token", "reload: second row numbers its own step (got '" + useTokenOf(r5b) + "')");
+  assert(useTokenOf(r5a) !== useTokenOf(r5b), "reload: rows still differ (no shared total)");
 }
 
 // 6) settings surfaces registered (bundle config page + settings tab + item card)
