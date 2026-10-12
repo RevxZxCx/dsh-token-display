@@ -147,8 +147,13 @@ const sandboxSetTimeout = (fn) => { rafQueue.push(fn); return rafQueue.length; }
 const sandboxClearTimeout = () => {};
 
 // ── react + primitives mocks ────────────────────────────────────────
-const jsx = (type, props, ...rest) => ({ type, props, children: rest });
-const jsxs = (type, props) => ({ type, props, children: props && props.children });
+// Faithful to the real react/jsx-runtime signature: jsx(type, config, maybeKey).
+// Children ONLY arrive through config.children; a third positional argument is
+// a React key. Call sites that pass children positionally render EMPTY elements
+// in the real app, so the mock models the key argument instead of swallowing
+// extra arguments into a children list.
+const jsx = (type, props, key) => ({ type, props, key });
+const jsxs = jsx;
 
 function mockSettingsFormModel() {
   return class SettingsFormModel {
@@ -354,6 +359,58 @@ assert(section && section.order > 0 && typeof section.label === "function", "set
 const item = bySlot("plugins.item");
 assert(item && item.id === "dsh-token-counter", "Plugins-page item card registered");
 assert(slotRegistrations.every((r) => r === undefined || typeof r.component === "function"), "every seat renders the card component");
+
+// ── 7) the card's render tree actually carries its children ──────────
+// Regression: the settings panel rendered blank because jsx/jsxs received
+// children as trailing arguments (React read them as a key and dropped them).
+// The mock above now models that signature, so assert the element tree built
+// by the component holds its children inside props.children.
+function renderCard(registrationEntry, extraProps) {
+  const face = registrationEntry.inject();
+  const store = face.hooks.tokenCounterCard;
+  const props = {
+    ...face,
+    t: (k) => k,
+    useTokenCounterCard: (selector) => selector(store.getSnapshot()),
+    ...extraProps,
+  };
+  return registrationEntry.component(props);
+}
+const childrenOf = (el) => (el && el.props && el.props.children);
+
+for (const seatName of ["settings.section", "settings.plugins.tab", "plugins.bundle.config", "plugins.item"]) {
+  const entry = bySlot(seatName);
+  if (!entry) continue;
+  const tree = renderCard(entry, { view: "page" });
+  assert(tree && tree.type !== "p", seatName + ": card renders an element tree");
+  if (seatName === "settings.section" || seatName === "settings.plugins.tab") {
+    const kids = childrenOf(tree);
+    assert(Array.isArray(kids) && kids.length === 3, seatName + ": section wrapper has heading + intro + form children");
+    assert(tree.key === undefined, seatName + ": section wrapper passes no bogus react key");
+    if (!Array.isArray(kids)) continue;
+    assert(kids[0] && kids[0].type === "h2", seatName + ": first child is the heading");
+    assert(kids[1] && kids[1].type === "p", seatName + ": second child is the description");
+    assert(kids[2] && kids[2].type === primitivesMock.SettingsForm, seatName + ": third child is the settings form");
+  }
+}
+
+const sectionEntry = bySlot("settings.section");
+const formEl = childrenOf(renderCard(sectionEntry, { view: "page" }))[2];
+const formChildren = childrenOf(formEl);
+assert(formChildren && formChildren.type === "div", "settings form body is the control group");
+const controls = childrenOf(formChildren);
+assert(Array.isArray(controls) && controls.length === 4, "control group holds the mode picker + 3 switches");
+assert(controls[0].type === primitivesMock.SegmentedControl, "first control is the display-mode picker");
+assert(controls.slice(1).every((c) => c.type === "div"), "each switch is wrapped in a labelled row");
+const rowKids = childrenOf(controls[1]);
+assert(Array.isArray(rowKids) && rowKids[0].props.children === "showInput" && rowKids[1].type === primitivesMock.Switch,
+  "switch row carries a visible caption plus the platform switch");
+
+const modeProps = childrenOf(formChildren)[0].props;
+assert(modeProps.options.length === 2 && modeProps.value === "merged", "mode picker shows merged/split from the served value");
+
+const summaryEl = renderCard(sectionEntry, { view: "summary" });
+assert(summaryEl.type === "p" && childrenOf(summaryEl) === "description", "summary view renders the one-liner");
 
 // ── cleanup ─────────────────────────────────────────────────────────
 for (const clean of effects) { try { clean(); } catch (e) {} }

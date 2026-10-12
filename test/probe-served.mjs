@@ -31,4 +31,6 @@ console.log("contains data-dsh-token-counter:", text.includes("data-dsh-token-co
 console.log("contains data-dsh-use-token:", text.includes("data-dsh-use-token"));
 console.log('contains inject=["sessions","slots","locale","configForms"]:', text.includes('["sessions", "slots", "locale", "configForms"]'));
 console.log("contains TokenCounterCard:", text.includes("TokenCounterCard"));
+console.log("has labelled switch rows (1.3.1):", text.includes("dsh-token-counter-row"));
+console.log("no positional-jsx call sites (1.3.1):", !/jsxs\(\s*"[a-z]+",\s*\{[^{}]*\},\s*\n?\s*jsx\(/.test(text));
 console.log("id line:", text.match(/id: "([^"]+)"/)?.[0]);
