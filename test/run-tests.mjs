@@ -33,15 +33,30 @@ function makeElement(tag) {
     children: [],
     parentNode: null,
     attributes: {},
-    get textContent() { return this._text; },
-    set textContent(v) { this._text = String(v); },
+    dataset: {},
+    style: { removeProperty(name) { delete this[name]; } },
+    get textContent() {
+      // mirror the DOM: an element's text is its subtree concatenated
+      if (this.children.length) return this.children.map((c) => c.textContent).join("");
+      return this._text;
+    },
+    set textContent(v) {
+      this._text = String(v);
+      this.children.length = 0;   // assigning text empties children, like the DOM
+    },
     get className() { return this.attributes["class"] ?? ""; },
     set className(v) { this.attributes["class"] = String(v); },
+    get firstChild() { return this.children[0] ?? null; },
     get firstElementChild() { return this.children[0] ?? null; },
     get lastElementChild() { return this.children[this.children.length - 1] ?? null; },
     setAttribute(k, v) { this.attributes[k] = String(v); },
     getAttribute(k) { return k in this.attributes ? this.attributes[k] : null; },
     appendChild(child) { child.parentNode = this; this.children.push(child); return child; },
+    removeChild(child) {
+      const i = this.children.indexOf(child);
+      if (i >= 0) { this.children.splice(i, 1); child.parentNode = null; }
+      return child;
+    },
     remove() {
       if (this.parentNode) {
         const i = this.parentNode.children.indexOf(this);
@@ -342,7 +357,15 @@ const sessions = {
 };
 
 // ── mock configForms service ────────────────────────────────────────
-let cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+let cfgValue = {
+  displayMode: "merged", showInput: true, showOutput: true, showPerOp: true,
+  inputUnit: "auto", outputUnit: "auto", perOpUnit: "auto",
+  inputFont: 0, outputFont: 0, perOpFont: 0,
+  inputColor: "", outputColor: "", perOpColor: "",
+};
+// cfgValue writes in tests keep working without restating the nine style
+// fields: mutate through this helper for the four booleans/mode only.
+const setCfg = (patch) => { cfgValue = { ...cfgValue, ...patch }; };
 let cfgListener = null;
 const cfgScope = {
   getSnapshot() { return { status: "ready", writable: true, value: cfgValue, base: {}, user: {}, revision: 1 }; },
@@ -434,30 +457,30 @@ runPoll();
 assert(useTokenText() === "use 142 token", "per-op total = input+output -> 'use 142 token' (got '" + useTokenText() + "')");
 
 // 3) split mode
-cfgValue = { displayMode: "split", showInput: true, showOutput: true, showPerOp: true };
+setCfg({ displayMode: "split", showInput: true, showOutput: true, showPerOp: true });
 if (cfgListener) cfgListener();
 flushRaf();
 assert(counterText() === "in 100 token · out 42 token", "split: 'in 100 token · out 42 token' (got '" + counterText() + "')");
 
 // 4) showOutput off (split) -> input only
-cfgValue = { displayMode: "split", showInput: true, showOutput: false, showPerOp: true };
+setCfg({ displayMode: "split", showInput: true, showOutput: false, showPerOp: true });
 if (cfgListener) cfgListener();
 flushRaf();
 assert(counterText() === "in 100 token", "split + showOutput off -> 'in 100 token' (got '" + counterText() + "')");
 
 // 5) step/start resets: merged shows the input count again
-cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+setCfg({ displayMode: "merged", showInput: true, showOutput: true, showPerOp: true });
 if (cfgListener) cfgListener();
 binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
 flushRaf();
-assert(counterText() === "in 5000 token", "merged after step/start -> priced prompt, 'in 5000 token' (got '" + counterText() + "')");
+assert(counterText() === "in 5K token", "merged after step/start -> priced prompt, 'in 5K token' (got '" + counterText() + "')");
 
 // 5a) prefill phase: with no recognised events yet, the badge still prices input
 {
   binding.eventSource._emit("replace", []);
   projectedTokens = 6100;
   flushRaf();
-  assert(counterText() === "in 6100 token", "merged prefill without events -> 'in 6100 token' (got '" + counterText() + "')");
+  assert(counterText() === "in 6.1K token", "merged prefill without events -> 'in 6.1K token' (got '" + counterText() + "')");
   // authoritative settle value outranks the priced projection
   binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 9, step: 0, usage: { inputTokens: 777, outputTokens: 5 } } } }]);
   flushRaf();
@@ -465,33 +488,33 @@ assert(counterText() === "in 5000 token", "merged after step/start -> priced pro
   // a new step re-prices from the projection (the old settle value is not the new prompt)
   binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
   flushRaf();
-  assert(counterText() === "in 6100 token", "merged after step/start re-reads the projection (got '" + counterText() + "')");
+  assert(counterText() === "in 6.1K token", "merged after step/start re-reads the projection (got '" + counterText() + "')");
 }
 
 // 5b) merged + showInput off: prefill shows the output counter, never a blank row
-cfgValue = { displayMode: "merged", showInput: false, showOutput: true, showPerOp: true };
+setCfg({ displayMode: "merged", showInput: false, showOutput: true, showPerOp: true });
 if (cfgListener) cfgListener();
 binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
 flushRaf();
 assert(counterText() === "out 0 token", "merged + showInput off during prefill -> falls back to out (got '" + counterText() + "')");
 
 // 5c) split mode keeps both counts visible through the whole turn
-cfgValue = { displayMode: "split", showInput: true, showOutput: true, showPerOp: true };
+setCfg({ displayMode: "split", showInput: true, showOutput: true, showPerOp: true });
 if (cfgListener) cfgListener();
 binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/live-chunk", data: { chunk: chunk("text-delta", "abcd") } } }]);
 flushRaf();
-assert(counterText() === "in 6100 token · out 1 token", "split during output keeps in + out (got '" + counterText() + "')");
+assert(counterText() === "in 6.1K token · out 1 token", "split during output keeps in + out (got '" + counterText() + "')");
 
 // 5c-2) a deployment that ships no projection falls back to the last input learned
 {
-  cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+  setCfg({ displayMode: "merged", showInput: true, showOutput: true, showPerOp: true });
   if (cfgListener) cfgListener();
   binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 12, step: 0, usage: { inputTokens: 4321, outputTokens: 9 } } } }]);
   flushRaf();
   projectedTokens = undefined;              // contextPressure absent entirely
   binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
   flushRaf();
-  assert(counterText() === "in 4321 token", "no projection -> prefill falls back to last known input (got '" + counterText() + "')");
+  assert(counterText() === "in 4.3K token", "no projection -> prefill falls back to last known input (got '" + counterText() + "')");
   projectedTokens = 6100;                   // restore for later checks
 }
 
@@ -512,13 +535,13 @@ assert(counterText() === "in 6100 token · out 1 token", "split during output ke
   assert(highlight.textContent === content.textContent, "highlight duplicates the content text (masked tint, not a moving copy)");
 
   // A text change must land in BOTH layers, or the tint desyncs from the glyphs.
-  cfgValue = { displayMode: "split", showInput: true, showOutput: true, showPerOp: true };
+  setCfg({ displayMode: "split", showInput: true, showOutput: true, showPerOp: true });
   if (cfgListener) cfgListener();
   projectedTokens = 6200;
   runPoll();
   const span2 = counterSpan();
   assert(span2 === span, "badge node is reused across updates (no flicker)");
-  assert(/in 6200 token/.test(span2.children[0].textContent),
+  assert(/in 6.2K token/.test(span2.children[0].textContent),
     "content layer updated (got '" + span2.children[0].textContent + "')");
   const hl2 = span2.children[1].children[0].children[0];
   assert(hl2.textContent === span2.children[0].textContent,
@@ -555,27 +578,27 @@ assert(counterText() === "in 6100 token · out 1 token", "split during output ke
 // 5f) per-OPERATION attribution: two completed operations in ONE reply must show
 // their OWN steps' usage, never the same whole-reply total (the old bug).
 {
-  cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+  setCfg({ displayMode: "merged", showInput: true, showOutput: true, showPerOp: true });
   if (cfgListener) cfgListener();
 
   // Step 0 of turn 2 settles while rowA is the open row.
   binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 2, step: 0, usage: { inputTokens: 1000, outputTokens: 20 } } } }]);
   runPoll();
-  assert(useTokenOf(rowA) === "use 1020 token", "rowA shows its own step (1000+20) (got '" + useTokenOf(rowA) + "')");
+  assert(useTokenOf(rowA) === "use 1K token", "rowA shows its own step (1020 -> 1K auto) (got '" + useTokenOf(rowA) + "')");
   assert(useTokenOf(rowB) === null, "rowB has no number before its step settles (got '" + useTokenOf(rowB) + "')");
   assert(useTokenOf(rowLive) === null, "the streaming row shows nothing");
 
   // Step 1 settles; rowB is now closed and takes the NEXT step, not the running total.
   binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 2, step: 1, usage: { inputTokens: 1200, outputTokens: 30 } } } }]);
   runPoll();
-  assert(useTokenOf(rowB) === "use 1230 token", "rowB shows its own step (1200+30), not the reply total (got '" + useTokenOf(rowB) + "')");
-  assert(useTokenOf(rowA) === "use 1020 token", "rowA keeps its own figure after a later step lands");
+  assert(useTokenOf(rowB) === "use 1.2K token", "rowB shows its own step (1230 -> 1.2K auto), not the reply total (got '" + useTokenOf(rowB) + "')");
+  assert(useTokenOf(rowA) === "use 1K token", "rowA keeps its own figure after a later step lands");
   assert(useTokenOf(rowA) !== useTokenOf(rowB), "the two operations show DIFFERENT numbers");
 
   // A re-settled step replaces its figure rather than accumulating.
   binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 2, step: 1, usage: { inputTokens: 1200, outputTokens: 50 } } } }]);
   runPoll();
-  assert(useTokenOf(rowB) === "use 1250 token", "re-settled step re-prices, never double counts (got '" + useTokenOf(rowB) + "')");
+  assert(useTokenOf(rowB) === "use 1.3K token", "re-settled step re-prices, never double counts (got '" + useTokenOf(rowB) + "')");
 
   // totalTokens wins when the provider reports it, and a row only earns its
   // number once it closes.
@@ -584,7 +607,7 @@ assert(counterText() === "in 6100 token · out 1 token", "split during output ke
   assert(useTokenOf(rowLive) === null, "still-streaming row stays unnumbered even after its step settles");
   liveShimmer.remove();
   runPoll();
-  assert(useTokenOf(rowLive) === "use 905 token", "closing the row paints its own step, preferring totalTokens (got '" + useTokenOf(rowLive) + "')");
+  assert(useTokenOf(rowLive) === "use 905 token", "closing the row paints its own step, preferring totalTokens (905 stays raw) (got '" + useTokenOf(rowLive) + "')");
 }
 
 // 5g) reload: a `replace` snapshot replays the whole loaded history at once, so
@@ -611,8 +634,8 @@ assert(counterText() === "in 6100 token · out 1 token", "split during output ke
     message(5, 1, 2400, 60),
   ]);
   runPoll();
-  assert(useTokenOf(r5a) === "use 2040 token", "reload: first row numbers its own step (got '" + useTokenOf(r5a) + "')");
-  assert(useTokenOf(r5b) === "use 2460 token", "reload: second row numbers its own step (got '" + useTokenOf(r5b) + "')");
+  assert(useTokenOf(r5a) === "use 2K token", "reload: first row numbers its own step (got '" + useTokenOf(r5a) + "')");
+  assert(useTokenOf(r5b) === "use 2.5K token", "reload: second row numbers its own step (got '" + useTokenOf(r5b) + "')");
   assert(useTokenOf(r5a) !== useTokenOf(r5b), "reload: rows still differ (no shared total)");
 }
 
@@ -697,7 +720,7 @@ cards[1].props.onSelect("split");
 assert(edits.some(([f, v]) => f === "displayMode" && v === "split"), "clicking the split card stages displayMode=split");
 
 // Toggling a switch propagates into BOTH cards.
-cfgValue = { displayMode: "merged", showInput: false, showOutput: true, showPerOp: false };
+setCfg({ displayMode: "merged", showInput: false, showOutput: true, showPerOp: false });
 if (cfgListener) cfgListener();
 const layoutDiv2 = childrenOf(childrenOf(renderCard(sectionEntry, { view: "page" }))[2]);
 const cards2 = childrenOf(childrenOf(childrenOf(layoutDiv2)[0])[1]);
@@ -705,7 +728,7 @@ assert(cards2.every((c) => c.props.showInput === false && c.props.showPerOp === 
   "switch changes flow into the preview cards (in off, per-op off)");
 
 // 7c) the switches section
-cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+setCfg({ displayMode: "merged", showInput: true, showOutput: true, showPerOp: true });
 if (cfgListener) cfgListener();
 const layout3 = childrenOf(childrenOf(renderCard(sectionEntry, { view: "page" }))[2]);
 const switchesSection = childrenOf(layout3)[1];
@@ -716,8 +739,66 @@ const switchRows = switchKids.slice(1);
 assert(switchRows.length === 3 && switchRows.every((r) => r.props.className === "dtc-switchRow"),
   "three labelled switch rows");
 const rowKids = childrenOf(switchRows[0]);
-assert(rowKids[0].props.children === "showInput" && rowKids[1].type === primitivesMock.Switch,
-  "switch row carries a visible caption plus the platform switch");
+assert(rowKids[0].props.children === "showInput", "switch row keeps its visible caption");
+// the caption's partner is now a control cluster: gear button + platform switch
+const ctlKids = childrenOf(rowKids[1]);
+assert(rowKids[1].props.className === "dtc-switchCtl", "caption pairs with the control cluster");
+assert(ctlKids[0].type.name === "GearPanel" || (ctlKids[0].props && ctlKids[0].props["aria-label"] === "gearLabel"),
+  "each switch row carries a gear button (aria-labelled)");
+assert(ctlKids.some((c) => c.type === primitivesMock.Switch), "the platform switch stays in the row");
+{
+  // mount the first gear through the hook runner: closed by default, opens on
+  // click, and exposes the three per-site fields (font / color / unit).
+  const gearEl = ctlKids[0];
+  const gearRunner = makeHookRunner();
+  activeHooks = gearRunner;
+  const drawGear = () => { gearRunner.render(gearEl.type, gearEl.props); return gearRunner.render(gearEl.type, gearEl.props); };
+  let g = drawGear();
+  const gearBtn = childrenOf(g)[0];
+  assert(gearBtn.props["aria-expanded"] === "false", "gear panel starts collapsed");
+  gearBtn.props.onClick();
+  g = drawGear();
+  assert(childrenOf(g).length === 2, "clicking the gear expands the dropdown panel");
+  const panel = childrenOf(g)[1];
+  assert(panel.props.className === "dtc-gearPanel", "expanded panel carries the gear-panel class");
+  const fields = childrenOf(panel);
+  assert(fields.length === 3, "panel exposes font + color + unit fields");
+  const unitSelect = childrenOf(fields[2])[1];
+  assert(unitSelect.type === "select" && unitSelect.props.value === "auto", "unit defaults to auto");
+  const opts = unitSelect.props.children;
+  assert(Array.isArray(opts) && opts.length === 5 && opts.map((o) => o.props.value).join(",") === "auto,K,M,G,T",
+    "unit offers auto + K/M/G/T (5 choices)");
+  const fontInput = childrenOf(fields[0])[1];
+  assert(fontInput.props.type === "number" && fontInput.props.min === "0", "font field is a numeric input");
+  const colorWrapKids = childrenOf(childrenOf(fields[1])[1]);
+  assert(colorWrapKids[0].props.type === "color", "color field is a native color picker");
+
+  // Choosing a unit stages the raw value through the form model (the panel is
+  // still open from the click above; gearEl.props.edit IS the form's edit).
+  const select2 = childrenOf(childrenOf(panel)[2])[1];
+  select2.props.onChange({ target: { value: "M" } });
+  assert(edits.some(([f, v]) => f === "inputUnit" && v === "M"), "unit choice stages inputUnit=M");
+
+  // Old-host degradation (review 5c327ff6 P3): a host whose Config lacks the
+  // fields yields text "undefined"; the select must clamp to "auto", not an
+  // empty control.
+  const junkState = {};
+  for (const suf of ["Unit", "Font", "Color"]) junkState["input" + suf] = { text: "undefined" };
+  const junkProps = { ...gearEl.props, state: junkState };
+  const jr = makeHookRunner();
+  activeHooks = jr;
+  jr.render(gearEl.type, junkProps);
+  const jbtn = childrenOf(jr.render(gearEl.type, junkProps))[0];
+  jbtn.props.onClick();
+  const jpanel = childrenOf(jr.render(gearEl.type, junkProps))[1];
+  const jselect = childrenOf(childrenOf(jpanel)[2])[1];
+  assert(jselect.props.value === "auto", "missing host fields still render auto-selected (no empty select)");
+  const jcolorWrap = childrenOf(childrenOf(jpanel)[1])[1];
+  assert(childrenOf(jcolorWrap)[0].props.value === "#1f2328", "junk color falls back to the picker sentinel");
+  jr.unmount();
+  gearRunner.unmount();
+  activeHooks = null;
+}
 
 // ── 7d) preview state machine (pure logic behind the hover animation) ─
 const P = mod.preview;
@@ -744,29 +825,104 @@ const P = mod.preview;
   while (f2 && !f2.done && guard2++ < 500) f2 = P.advance(f2, "merged", true, false);
   assert(f2.phase === "in" && f2.value === P.FAKE_IN, "merged in-only ends parked on the in cap");
 
+  // preview segments read a sites fixture: { site: {unit,font,color} }
+  const AUTO_SITES = {
+    input: { unit: "auto", font: 0, color: "" },
+    output: { unit: "auto", font: 0, color: "" },
+    perOp: { unit: "auto", font: 0, color: "" },
+  };
+  const segText = (mode, frame, showIn, showOut, sites) =>
+    P.segmentsText(P.badgeSegments(mode, frame, showIn, showOut, sites || AUTO_SITES));
+
   // split: in fills first, then out fills while both stay in the text.
   let f3 = P.startFrame(true, true);
   let sawBoth = false;
   let guard3 = 0;
   while (f3 && !f3.done && guard3++ < 500) {
     f3 = P.advance(f3, "split", true, true);
-    const text = P.badgeText("split", f3, true, true);
-    if (/in \d+ token · out \d+ token/.test(text)) sawBoth = true;
+    const text = segText("split", f3, true, true);
+    if (/in [\d.]+[A-Z]* token · out [\d.]+[A-Z]* token/.test(text)) sawBoth = true;
     assert(f3.inValue <= P.FAKE_IN && f3.outValue <= P.FAKE_OUT, "split values stay under caps");
   }
   assert(f3.done && f3.inValue === P.FAKE_IN && f3.outValue === P.FAKE_OUT, "split fills in then out to caps");
   assert(sawBoth, "split text shows in AND out together");
 
   // badge text respects the switches: in hidden -> never shows "in".
-  const mergedInText = P.badgeText("merged", { phase: "in", value: 500 }, false, true);
+  const mergedInText = segText("merged", { phase: "in", value: 500 }, false, true);
   assert(mergedInText === "" || /^out /.test(mergedInText), "merged hides in when showInput is off (got '" + mergedInText + "')");
-  const splitText = P.badgeText("split", { inValue: 100, outValue: 20 }, false, true);
+  const splitText = segText("split", { inValue: 100, outValue: 20 }, false, true);
   assert(splitText === "out 20 token", "split drops the in segment when showInput is off (got '" + splitText + "')");
 
-  // no hover -> static idle frame with the full fake figures.
-  const idle = P.badgeText("split", P.idleFrame("split", true, true), true, true);
-  assert(idle === "in " + P.FAKE_IN + " token · out " + P.FAKE_OUT + " token", "idle card shows complete fake counts (got '" + idle + "')");
+  // no hover -> static idle frame with the full fake figures (auto-scaled:
+  // 1866 -> 1.9K, 348 stays raw).
+  const idle = segText("split", P.idleFrame("split", true, true), true, true);
+  assert(idle === "in 1.9K token · out 348 token", "idle card shows complete fake counts under auto units (got '" + idle + "')");
+
+  // a FIXED unit applies to its site only, and carries into the preview.
+  const fixedIn = segText("split", { inValue: P.FAKE_IN, outValue: P.FAKE_OUT }, true, true, {
+    input: { unit: "K", font: 0, color: "" },
+    output: { unit: "auto", font: 0, color: "" },
+    perOp: { unit: "auto", font: 0, color: "" },
+  });
+  assert(fixedIn === "in 1.9K token · out 348 token", "fixed K unit formats only the in site (got '" + fixedIn + "')");
+  const fixedM = segText("split", { inValue: P.FAKE_IN, outValue: P.FAKE_OUT }, true, true, {
+    input: { unit: "M", font: 0, color: "" },
+    output: { unit: "auto", font: 0, color: "" },
+    perOp: { unit: "auto", font: 0, color: "" },
+  });
+  assert(fixedM === "in 0M token · out 348 token", "fixed M on a small number rounds to 0M (the user chose the unit) (got '" + fixedM + "')");
+
+  // segments carry per-site style for the renderer to attach.
+  const styled = P.badgeSegments("split", { inValue: 100, outValue: 200 }, true, true, {
+    input: { unit: "auto", font: 16, color: "#ff0000" },
+    output: { unit: "auto", font: 0, color: "" },
+    perOp: { unit: "auto", font: 0, color: "" },
+  });
+  assert(styled[0].font === 16 && styled[0].color === "#ff0000", "in segment carries its site's font/color");
+  assert(styled[1].font === 0 && styled[1].color === "", "out segment keeps the inherited style");
+
   assert(P.startFrame(false, false) === null, "both switches off -> nothing to animate");
+
+  // ── unit formatting itself ──
+  const F = mod.tokens.format;
+  assert(F(0, "auto") === "0", "0 -> 0");
+  assert(F(999, "auto") === "999", "999 stays raw");
+  assert(F(1000, "auto") === "1K", "1000 -> 1K");
+  assert(F(1500, "auto") === "1.5K", "1500 -> 1.5K");
+  assert(F(999_999, "auto") === "1M", "999999 promotes instead of 1000K");
+  // review run 5c327ff6 P1: Math.round is half-up, so the promotion boundary
+  // is 999.5, NOT 999.95 — the 999.5–999.94 interval must also promote.
+  assert(F(999_500, "auto") === "1M", "999500 -> 1M (rounds to 1000K otherwise)");
+  assert(F(999_499, "auto") === "999K", "999499 stays 999K (rounds down)");
+  assert(F(999_949, "K") === "1M", "fixed K promotes at the 999.5 boundary");
+  // review P3: fixed units promote STEPWISE, never strand at >=1000.
+  assert(F(1_000_000_000, "K") === "1G", "1e9 locked to K promotes K->M->G");
+  assert(F(999_949_999, "M") === "1G", "fixed M promotes at the boundary too");
+  assert(F(1e15, "K") === "1000T", "T is the top: beyond it caps at 1000T");
+  assert(F(2_500_000, "auto") === "2.5M", "2.5M");
+  assert(F(3_200_000_000, "auto") === "3.2G", "3.2G");
+  assert(F(1_500_000_000_000, "auto") === "1.5T", "1.5T");
+  assert(F(1234, "K") === "1.2K", "fixed K always scales");
+  assert(F(500, "K") === "0.5K", "fixed K under-scales small values (user chose it)");
+  assert(F(999_999, "K") === "1M", "fixed K never prints 1000K");
+  assert(F(1234, "auto") === "1.2K", "auto keeps one decimal below 100 scaled");
+  assert(mod.tokens.sanitizeFont("16") === 16 && mod.tokens.sanitizeFont(-5) === 0 && mod.tokens.sanitizeFont(500) === 96,
+    "font sanitizer clamps 0..96");
+  assert(mod.tokens.sanitizeColor("#ff0000") === "#ff0000" && mod.tokens.sanitizeColor("red; } body{display:none}") === "",
+    "color sanitizer admits hex only (no CSS injection)");
+  // review P3: the member test must be own-property — inherited keys like
+  // "constructor"/"__proto__" would otherwise leak through as "valid" units.
+  {
+    const U = mod.tokens ? mod.tokens.sanitizeUnit : undefined;
+    assert(typeof U === "function", "sanitizeUnit exported for tests");
+    assert(U("auto") === "auto" && U("K") === "K" && U("T") === "T", "real units pass through");
+    assert(U("constructor") === "auto" && U("__proto__") === "auto" && U("toString") === "auto",
+      "inherited prototype keys sanitize to auto");
+    assert(U(undefined) === "auto" && U("X") === "auto" && U(42) === "auto", "junk sanitizes to auto");
+    assert(F(1234, U("constructor")) === "1.2K", "a leaked prototype unit can never reach formatTokens");
+  }
+  const style = mod.tokens.siteStyle(0, "");
+  assert(Object.keys(style).length === 0, "0/'' style emits nothing (inherits the row)");
 }
 
 // ── 7e) MODEPREVIEWCARD mounted: the component itself, through the hook ──
@@ -774,7 +930,7 @@ const P = mod.preview;
 // cleanup paths the pure-function tests cannot reach.
 {
   const P = mod.preview;
-  cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+  setCfg({ displayMode: "merged", showInput: true, showOutput: true, showPerOp: true });
   if (cfgListener) cfgListener();
   const tree = renderCard(bySlot("settings.section"), { view: "page" });
   const layout = childrenOf(childrenOf(tree)[2]);        // form body = dtc-layout div
@@ -794,8 +950,15 @@ const P = mod.preview;
     for (const k of list) { const hit = findBadge(k); if (hit) return hit; }
     return null;
   };
-  // Badge layers: children[0] is the static content span holding the text.
-  const badgeTextOf = (el) => (el && el.props.children[0] && el.props.children[0].props.children);
+  // Badge layers: children[0] is the static content span; its children are the
+  // segment nodes, so flatten the subtree back into one string.
+  const nodeText = (n) => {
+    if (n === null || n === undefined) return "";
+    if (typeof n === "string") return n;
+    const inner = n.props && n.props.children;
+    return Array.isArray(inner) ? inner.map(nodeText).join("") : nodeText(inner);
+  };
+  const badgeTextOf = (el) => (el && el.props.children[0] ? nodeText(el.props.children[0]) : null);
   const findOpRow = (node) => {
     if (!node || typeof node !== "object") return null;
     if (node.props && node.props.className === "dtc-opRow") return node;

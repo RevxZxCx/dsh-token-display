@@ -10,6 +10,11 @@ after each completed step. It is global: once enabled, every conversation gets i
    "华光划过" (shimmer sweep) badge shows the streaming token count, painted with
    the platform's own shimmer so it reads as part of the same sentence.
    - `in N token` = input tokens, `out N token` = output tokens.
+   - **Unit scaling (auto by default)** — numbers render as `K` (1e3), `M`
+     (1e6), `G` (1e9) or `T` (1e12) by magnitude (`1866 → 1.9K`,
+     `2 500 000 → 2.5M`); below 1000 the raw number shows. A rounding that
+     would print `1000K` promotes to `1M` instead. Each site (in / out / use)
+     can instead LOCK one unit in its gear menu and then always scales by it.
    - The input count is the number the harness itself prices the prompt with
      (its `contextPressure` projection), so it is live during the input phase and
      does not wait for the provider's `usage`. When the provider does report
@@ -24,12 +29,16 @@ after each completed step. It is global: once enabled, every conversation gets i
      first output token streams).
    - `split`: always shows `in … · out …` together, for the whole turn.
 3. **In / out visibility (configurable)** — independent switches to show/hide
-   the input and output counters (both on by default).
+   the input and output counters (both on by default). Each of the three
+   switches carries a **gear button**: clicking it drops open a per-site editor
+   with **font size** (0/empty = follow the interface text), **color** (a native
+   picker plus a "follow theme" reset) and **unit** (auto / K / M / G / T).
+   Settings are staged in the same form and saved together with everything else.
 4. **Per-operation "use N token" (configurable)** — after each completed
    operation ("已完成思考", "已完成命令", …) a `use N token` label appears, styled to
    match that row, showing the tokens **that operation's own step** consumed
    (input + output, or the provider's `totalTokens` when it reports one) — never
-   the whole reply's total. One switch toggles it.
+   the whole reply's total. One switch toggles it; its own gear menu styles it.
 5. All options are configurable from four places: **设置 → Token 计数器**
    (Settings → Token Counter), the same tab under **设置 → 内置插件**, the
    configuration section on this bundle's page in the **插件 / Plugins** panel,
@@ -40,7 +49,8 @@ after each completed step. It is global: once enabled, every conversation gets i
    shimmer sweep, all with fake data). Hovering a card animates the numbers
    (in climbs to its cap, pauses, then out climbs); clicking it switches the
    display mode; and the in / out / use toggles update both cards live — turn
-   `in` off and both cards drop the in segment immediately.
+   `in` off and both cards drop the in segment immediately. The gear menus'
+   unit/font/color choices are reflected in the preview cards before saving.
 
 ## Install
 

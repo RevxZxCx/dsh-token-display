@@ -12,3 +12,4 @@ Thumbs.db
 
 # local-only review archives; never commit (scoped so real docs stay addable)
 /docs/review-*.md
+/.review_diff_*.txt

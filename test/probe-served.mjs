@@ -41,4 +41,7 @@ console.log("per-step usage records (1.3.5):", text.includes("recordStep") && te
 console.log("no turn-level accumulator (1.3.5):", !text.includes("turnUsage"));
 console.log("preview cards (1.4.0):", text.includes("ModePreviewCard") && text.includes("dtc-cards"));
 console.log("no segmented control (1.4.0):", !text.includes("SegmentedControl"));
+console.log("unit formatting (1.5.0):", text.includes("formatTokens") && text.includes("UNIT_SCALES"));
+console.log("gear panels (1.5.0):", text.includes("GearPanel") && text.includes("dtc-gearPanel"));
+console.log("badge segments (1.5.0):", text.includes("buildBadgeSegments") && text.includes("fillBadge"));
 console.log("id line:", text.match(/id: "([^"]+)"/)?.[0]);
