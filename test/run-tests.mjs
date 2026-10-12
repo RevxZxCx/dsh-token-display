@@ -175,8 +175,41 @@ const sandboxClearTimeout = () => {};
 // a React key. Call sites that pass children positionally render EMPTY elements
 // in the real app, so the mock models the key argument instead of swallowing
 // extra arguments into a children list.
-const jsx = (type, props, key) => ({ type, props, key });
+const jsx = (type, props, key) => (key === undefined ? { type, props } : { type, props, key });
 const jsxs = jsx;
+// Minimal hook fakes: enough for the preview card's hover animation to run
+// inside assertions (state + effect + a manually driven interval).
+function makeHookRunner() {
+  const slots = [];
+  let cursor = 0;
+  let cleanups = [];
+  const runner = {
+    render(fn, props) {
+      cursor = 0;
+      const result = fn(props);
+      cleanups.forEach((c) => c());
+      cleanups = [];
+      return result;
+    },
+    useState(initial) {
+      const i = cursor++;
+      if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
+      const set = (v) => { slots[i] = typeof v === "function" ? v(slots[i]) : v; };
+      return [slots[i], set];
+    },
+    useRef(initial) {
+      const i = cursor++;
+      if (!(i in slots)) slots[i] = { current: initial };
+      return slots[i];
+    },
+    useEffect(fn) {
+      // run once per render; capture cleanup
+      cleanups.push(fn() || (() => {}));
+    },
+    setSlot(i, v) { slots[i] = v; },
+  };
+  return runner;
+}
 
 function mockSettingsFormModel() {
   return class SettingsFormModel {
@@ -194,10 +227,11 @@ function mockSettingsFormModel() {
       const v = this.scope.getSnapshot().value?.[f];
       return { text: spec ? spec.format(v) : String(v), overridden: false, invalid: false };
     }
-    actions() { return { edit: () => {}, resetField: () => {}, save: async () => {}, discard: () => {} }; }
+    actions() { return { edit: (f, v) => { edits.push([f, v]); }, resetField: () => {}, save: async () => {}, discard: () => {} }; }
     dispose() {}
   };
 }
+const edits = [];
 
 const primitivesMock = {
   SettingsForm: () => null,
@@ -227,10 +261,18 @@ assert(registration && registration.id === "dsh-token-counter", "factory registe
 
 const factoryRequire = (name) => {
   if (name === "react/jsx-runtime") return { jsx, jsxs, Fragment: Symbol("Fragment") };
-  if (name === "react") return { createElement: () => null, memo: (x) => x, useState: () => [null, () => {}], useCallback: (fn) => fn, useRef: () => ({ current: null }), useEffect: () => {} };
+  if (name === "react") return {
+    createElement: () => null, memo: (x) => x, useCallback: (fn) => fn,
+    // hook calls delegate to the active runner so component tests can mount
+    // real state + effects; default no-ops keep apply()-level tests unaffected.
+    useState: (i) => (activeHooks ? activeHooks.useState(i) : [i, () => {}]),
+    useRef: (i) => (activeHooks ? activeHooks.useRef(i) : { current: i }),
+    useEffect: (fn) => { if (activeHooks) activeHooks.useEffect(fn); },
+  };
   if (name === "@deepseek-ai/dsh-client-ui-primitives") return primitivesMock;
   throw new Error("unexpected require: " + name);
 };
+let activeHooks = null;
 const mod = registration.factory(factoryRequire);
 assert(typeof mod.apply === "function", "exports.apply is a function");
 assert(Array.isArray(mod.inject) && mod.inject.includes("sessions"), "exports.inject includes sessions");
@@ -578,19 +620,104 @@ for (const seatName of ["settings.section", "settings.plugins.tab", "plugins.bun
 
 const sectionEntry = bySlot("settings.section");
 const formEl = childrenOf(renderCard(sectionEntry, { view: "page" }))[2];
-const formChildren = childrenOf(formEl);
-assert(formChildren && formChildren.type === "div", "settings form body is the control group");
-const controls = childrenOf(formChildren);
-assert(Array.isArray(controls) && controls.length === 4, "control group holds the mode picker + 3 switches");
-assert(controls[0].type === primitivesMock.SegmentedControl, "first control is the display-mode picker");
-assert(controls.slice(1).every((c) => c.type === "div"), "each switch is wrapped in a labelled row");
-const rowKids = childrenOf(controls[1]);
-assert(Array.isArray(rowKids) && rowKids[0].props.children === "showInput" && rowKids[1].type === primitivesMock.Switch,
+const layout = childrenOf(formEl);
+assert(layout && layout.props.className === "dtc-layout", "settings form body is the dtc-layout");
+const sections = childrenOf(layout);
+assert(Array.isArray(sections) && sections.length === 2, "layout holds the preview section + the switches section");
+
+// ── 7b) preview cards replace the segmented control ───────────────────
+const previewsSection = sections[0];
+assert(previewsSection.props.className === "dtc-previews", "first section is the preview area");
+const headEl = childrenOf(previewsSection)[0];
+assert(childrenOf(headEl).some((c) => c && c.props && c.props.children === "previewHint"),
+  "preview head carries the hover hint copy");
+const cardsEl = childrenOf(previewsSection)[1];
+assert(cardsEl.props.className === "dtc-cards", "cards live in the dtc-cards grid");
+const cards = childrenOf(cardsEl);
+assert(Array.isArray(cards) && cards.length === 2, "exactly two preview cards");
+assert(cards[0].props.mode === "merged" && cards[1].props.mode === "split", "cards preview merged + split");
+assert(cards[0].key === "merged" && cards[1].key === "split", "each card carries a distinct react key (not a dropped positional child)");
+assert(cards.some((c) => c.props.selected === true) && cards[0].props.selected === true,
+  "the served mode's card is selected (merged)");
+assert(cards.every((c) => c.props.showInput === true && c.props.showOutput === true && c.props.showPerOp === true),
+  "cards mirror the current switch state");
+
+// Clicking the other card edits displayMode through the form.
+cards[1].props.onSelect("split");
+assert(edits.some(([f, v]) => f === "displayMode" && v === "split"), "clicking the split card stages displayMode=split");
+
+// Toggling a switch propagates into BOTH cards.
+cfgValue = { displayMode: "merged", showInput: false, showOutput: true, showPerOp: false };
+if (cfgListener) cfgListener();
+const layoutDiv2 = childrenOf(childrenOf(renderCard(sectionEntry, { view: "page" }))[2]);
+const cards2 = childrenOf(childrenOf(childrenOf(layoutDiv2)[0])[1]);
+assert(cards2.every((c) => c.props.showInput === false && c.props.showPerOp === false),
+  "switch changes flow into the preview cards (in off, per-op off)");
+
+// 7c) the switches section
+cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+if (cfgListener) cfgListener();
+const layout3 = childrenOf(childrenOf(renderCard(sectionEntry, { view: "page" }))[2]);
+const switchesSection = childrenOf(layout3)[1];
+assert(switchesSection.props.className === "dtc-switches", "second section is the switch panel");
+const switchKids = childrenOf(switchesSection);
+assert(switchKids[0].type === "h3", "switch panel has its own heading");
+const switchRows = switchKids.slice(1);
+assert(switchRows.length === 3 && switchRows.every((r) => r.props.className === "dtc-switchRow"),
+  "three labelled switch rows");
+const rowKids = childrenOf(switchRows[0]);
+assert(rowKids[0].props.children === "showInput" && rowKids[1].type === primitivesMock.Switch,
   "switch row carries a visible caption plus the platform switch");
 
-const modeProps = childrenOf(formChildren)[0].props;
-assert(modeProps.options.length === 2 && modeProps.value === cfgValue.displayMode,
-  "mode picker reflects the served value ('" + cfgValue.displayMode + "') and offers merged/split");
+// ── 7d) preview state machine (pure logic behind the hover animation) ─
+{
+  const P = mod.preview;
+  // merged: in climbs to its cap, pauses, then out climbs to ITS cap, then done.
+  let f = P.startFrame(true, true);
+  const samples = [];   // [phaseBeforeTick, value] — the switch tick still counts as "in"
+  let guard = 0;
+  while (f && !f.done && guard++ < 500) {
+    const before = f.phase;
+    f = P.advance(f, "merged", true, true);
+    samples.push([before, f.value]);
+  }
+  assert(f && f.done && guard < 500, "merged preview animation terminates");
+  assert(samples[0][0] === "in" && samples[samples.length - 1][0] === "out", "merged runs in first, then swaps to out");
+  const inPeak = Math.max(...samples.filter(([p]) => p === "in").map(([, v]) => v));
+  const outPeak = Math.max(...samples.filter(([p]) => p === "out").map(([, v]) => v));
+  assert(inPeak === P.FAKE_IN && outPeak === P.FAKE_OUT, "in/out each climb to their own cap then stop (in=" + inPeak + " out=" + outPeak + ")");
+  assert(Math.max(...samples.map(([, v]) => v)) <= Math.max(P.FAKE_IN, P.FAKE_OUT), "numbers never exceed the cap");
+
+  // merged with in only: climbs to FAKE_IN and stops (no swap to out).
+  let f2 = P.startFrame(true, false);
+  let guard2 = 0;
+  while (f2 && !f2.done && guard2++ < 500) f2 = P.advance(f2, "merged", true, false);
+  assert(f2.phase === "in" && f2.value === P.FAKE_IN, "merged in-only ends parked on the in cap");
+
+  // split: in fills first, then out fills while both stay in the text.
+  let f3 = P.startFrame(true, true);
+  let sawBoth = false;
+  let guard3 = 0;
+  while (f3 && !f3.done && guard3++ < 500) {
+    f3 = P.advance(f3, "split", true, true);
+    const text = P.badgeText("split", f3, true, true);
+    if (/in \d+ token · out \d+ token/.test(text)) sawBoth = true;
+    assert(f3.inValue <= P.FAKE_IN && f3.outValue <= P.FAKE_OUT, "split values stay under caps");
+  }
+  assert(f3.done && f3.inValue === P.FAKE_IN && f3.outValue === P.FAKE_OUT, "split fills in then out to caps");
+  assert(sawBoth, "split text shows in AND out together");
+
+  // badge text respects the switches: in hidden -> never shows "in".
+  const mergedInText = P.badgeText("merged", { phase: "in", value: 500 }, false, true);
+  assert(mergedInText === "" || /^out /.test(mergedInText), "merged hides in when showInput is off (got '" + mergedInText + "')");
+  const splitText = P.badgeText("split", { inValue: 100, outValue: 20 }, false, true);
+  assert(splitText === "out 20 token", "split drops the in segment when showInput is off (got '" + splitText + "')");
+
+  // no hover -> static idle frame with the full fake figures.
+  const idle = P.badgeText("split", P.idleFrame("split", true, true), true, true);
+  assert(idle === "in " + P.FAKE_IN + " token · out " + P.FAKE_OUT + " token", "idle card shows complete fake counts (got '" + idle + "')");
+  assert(P.startFrame(false, false) === null, "both switches off -> nothing to animate");
+}
 
 const summaryEl = renderCard(sectionEntry, { view: "summary" });
 assert(summaryEl.type === "p" && childrenOf(summaryEl) === "description", "summary view renders the one-liner");

@@ -1,6 +1,6 @@
 {
   "name": "dsh-token-counter",
-  "version": "1.3.5",
+  "version": "1.4.0",
   "description": "DSH plugin: realtime token counter after the deep-thinking indicator",
   "type": "module",
   "main": "lib/index.js",

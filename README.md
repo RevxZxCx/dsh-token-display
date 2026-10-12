@@ -34,6 +34,13 @@ after each completed step. It is global: once enabled, every conversation gets i
    (Settings → Token Counter), the same tab under **设置 → 内置插件**, the
    configuration section on this bundle's page in the **插件 / Plugins** panel,
    and the card in that panel's **官方 / Official** group.
+6. **Visual settings UI** — a light white/grey, adaptive two-pane layout: merged
+   and split each get a **preview card that recreates the real transcript scene**
+   (a "Command finished · use N token" row and the deep-thinking badge with the
+   shimmer sweep, all with fake data). Hovering a card animates the numbers
+   (in climbs to its cap, pauses, then out climbs); clicking it switches the
+   display mode; and the in / out / use toggles update both cards live — turn
+   `in` off and both cards drop the in segment immediately.
 
 ## Install
 
@@ -57,11 +64,13 @@ dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
    "深度思考" indicator and counts up in real time.
 3. When the answer completes, each "已完成…" operation row shows `use N token`
    for that operation's own step.
-4. Open **设置 → Token 计数器** to switch merged/split mode and toggle the
-   input / output / per-operation displays. The same form is also reachable as a
-   tab under **设置 → 内置插件**, as the configuration section on this bundle's
-   page in the **插件 / Plugins** panel ("dsh-token-counter" → 配置), and as the
-   "Token 计数器" card in that panel's "官方 / Official" group.
+4. Open **设置 → Token 计数器**: hover a preview card to watch the numbers
+   animate, click it to switch merged/split, and use the in / output / per-op
+   toggles — the cards update in lockstep. Save when you are done. The same
+   form is also reachable as a tab under **设置 → 内置插件**, as the
+   configuration section on this bundle's page in the **插件 / Plugins** panel
+   ("dsh-token-counter" → 配置), and as the "Token 计数器" card in that panel's
+   "官方 / Official" group.
    If the settings form reports "This plugin is not loaded, so it cannot be
    configured right now", the host half is not mounted — run
    `dsh --profile desktop --dump-config` (or check the profile's
