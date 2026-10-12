@@ -33,4 +33,8 @@ console.log('contains inject=["sessions","slots","locale","configForms"]:', text
 console.log("contains TokenCounterCard:", text.includes("TokenCounterCard"));
 console.log("has labelled switch rows (1.3.1):", text.includes("dsh-token-counter-row"));
 console.log("no positional-jsx call sites (1.3.1):", !/jsxs\(\s*"[a-z]+",\s*\{[^{}]*\},\s*\n?\s*jsx\(/.test(text));
+console.log("platform shimmer geometry (1.3.2):", text.includes("dsh-token-counter-highlight"));
+console.log("counter-moving keyframes (1.3.2):", text.includes("@keyframes dsh-token-counter-highlight"));
+console.log("inherits row shimmer color (1.3.2):", text.includes("--dsw-alias-label-shimmer"));
+console.log("reads contextPressure projection (1.3.2):", text.includes("contextPressure"));
 console.log("id line:", text.match(/id: "([^"]+)"/)?.[0]);

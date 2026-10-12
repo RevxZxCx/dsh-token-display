@@ -37,6 +37,8 @@ function makeElement(tag) {
     set textContent(v) { this._text = String(v); },
     get className() { return this.attributes["class"] ?? ""; },
     set className(v) { this.attributes["class"] = String(v); },
+    get firstElementChild() { return this.children[0] ?? null; },
+    get lastElementChild() { return this.children[this.children.length - 1] ?? null; },
     setAttribute(k, v) { this.attributes[k] = String(v); },
     getAttribute(k) { return k in this.attributes ? this.attributes[k] : null; },
     appendChild(child) { child.parentNode = this; this.children.push(child); return child; },
@@ -230,9 +232,21 @@ function makeBinding() {
 }
 
 let listListener = null;
-const byId = { s1: { id: "s1", retainedBy: { mainView: 1 } } };
+// `projectionValues.contextPressure` mirrors what the harness's token-meter
+// ships to the browser: the priced size of the prompt about to be sent.
+let projectedTokens = 5000;
+const byId = {
+  s1: {
+    id: "s1",
+    retainedBy: { mainView: 1 },
+    projectionValues: { contextPressure: { projectedTokens: 5000, contextWindow: 200000 } },
+  },
+};
 const list = {
-  getSnapshot() { return { ids: Object.keys(byId), byId }; },
+  getSnapshot() {
+    byId.s1.projectionValues = { contextPressure: { projectedTokens, contextWindow: 200000 } };
+    return { ids: Object.keys(byId), byId };
+  },
   subscribe(fn) { listListener = fn; return () => { listListener = null; }; }
 };
 const binding = makeBinding();
@@ -299,6 +313,9 @@ function counterText() {
   if (!span) return null;
   return span.children[0] ? span.children[0].textContent : null;
 }
+function counterSpan() {
+  return runningContent.children.find((c) => c.getAttribute("data-dsh-token-counter") === "true") || null;
+}
 function useTokenText() {
   const span = processBtn.children.find((c) => c.getAttribute("data-dsh-use-token") === "true");
   return span ? span.textContent : null;
@@ -335,12 +352,88 @@ if (cfgListener) cfgListener();
 flushRaf();
 assert(counterText() === "in 100 token", "split + showOutput off -> 'in 100 token' (got '" + counterText() + "')");
 
-// 5) step/start resets (back to merged)
+// 5) step/start resets: merged shows the input count again
 cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
 if (cfgListener) cfgListener();
 binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
 flushRaf();
-assert(counterText() === "out 0 token", "step/start resets -> 'out 0 token' (got '" + counterText() + "')");
+assert(counterText() === "in 5000 token", "merged after step/start -> priced prompt, 'in 5000 token' (got '" + counterText() + "')");
+
+// 5a) prefill phase: with no recognised events yet, the badge still prices input
+{
+  binding.eventSource._emit("replace", []);
+  projectedTokens = 6100;
+  flushRaf();
+  assert(counterText() === "in 6100 token", "merged prefill without events -> 'in 6100 token' (got '" + counterText() + "')");
+  // authoritative settle value outranks the priced projection
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 9, step: 0, usage: { inputTokens: 777, outputTokens: 5 } } } }]);
+  flushRaf();
+  assert(counterText() === "out 5 token", "merged output phase shows out (got '" + counterText() + "')");
+  // a new step re-prices from the projection (the old settle value is not the new prompt)
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
+  flushRaf();
+  assert(counterText() === "in 6100 token", "merged after step/start re-reads the projection (got '" + counterText() + "')");
+}
+
+// 5b) merged + showInput off: prefill shows the output counter, never a blank row
+cfgValue = { displayMode: "merged", showInput: false, showOutput: true, showPerOp: true };
+if (cfgListener) cfgListener();
+binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
+flushRaf();
+assert(counterText() === "out 0 token", "merged + showInput off during prefill -> falls back to out (got '" + counterText() + "')");
+
+// 5c) split mode keeps both counts visible through the whole turn
+cfgValue = { displayMode: "split", showInput: true, showOutput: true, showPerOp: true };
+if (cfgListener) cfgListener();
+binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/live-chunk", data: { chunk: chunk("text-delta", "abcd") } } }]);
+flushRaf();
+assert(counterText() === "in 6100 token · out 1 token", "split during output keeps in + out (got '" + counterText() + "')");
+
+// 5c-2) a deployment that ships no projection falls back to the last input learned
+{
+  cfgValue = { displayMode: "merged", showInput: true, showOutput: true, showPerOp: true };
+  if (cfgListener) cfgListener();
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 12, step: 0, usage: { inputTokens: 4321, outputTokens: 9 } } } }]);
+  flushRaf();
+  projectedTokens = undefined;              // contextPressure absent entirely
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
+  flushRaf();
+  assert(counterText() === "in 4321 token", "no projection -> prefill falls back to last known input (got '" + counterText() + "')");
+  projectedTokens = 6100;                   // restore for later checks
+}
+
+// 5d) badge mirrors the platform TextShimmer geometry: static content layer plus
+// one decorative overlay whose inner text layer carries the same string, so the
+// highlight crosses FIXED glyphs (never a second copy of the text sliding by).
+{
+  const span = counterSpan();
+  assert(span !== null, "badge exists for structure checks");
+  const content = span.children[0];
+  const dec = span.children[1];
+  assert(content.className === "dsh-token-counter-content", "first layer is the static content");
+  assert(dec.getAttribute("aria-hidden") === "true" && dec.getAttribute("inert") === "", "overlay is aria-hidden and inert");
+  const sweep = dec.children[0];
+  assert(sweep.className === "dsh-token-counter-sweep", "overlay wraps the travelling mask");
+  const highlight = sweep.children[0];
+  assert(highlight.className === "dsh-token-counter-content dsh-token-counter-highlight", "mask wraps the counter-travelling highlight");
+  assert(highlight.textContent === content.textContent, "highlight duplicates the content text (masked tint, not a moving copy)");
+
+  // A text change must land in BOTH layers, or the tint desyncs from the glyphs.
+  cfgValue = { displayMode: "split", showInput: true, showOutput: true, showPerOp: true };
+  if (cfgListener) cfgListener();
+  projectedTokens = 6200;
+  runPoll();
+  const span2 = counterSpan();
+  assert(span2 === span, "badge node is reused across updates (no flicker)");
+  assert(/in 6200 token/.test(span2.children[0].textContent),
+    "content layer updated (got '" + span2.children[0].textContent + "')");
+  const hl2 = span2.children[1].children[0].children[0];
+  assert(hl2.textContent === span2.children[0].textContent,
+    "highlight layer updated in lockstep (got '" + hl2.textContent + "')");
+  assert(styleStore.get("dsh-token-counter-style").textContent.includes("dsh-token-counter-highlight"), "counter-moving keyframes shipped");
+  assert(styleStore.get("dsh-token-counter-style").textContent.includes("--dsw-alias-label-shimmer"), "highlight color inherits the row's shimmer variable");
+  assert(styleStore.get("dsh-token-counter-style").textContent.includes("font:inherit"), "badge inherits the running row's font");
+}
 
 // 6) settings surfaces registered (bundle config page + settings tab + item card)
 const bySlot = (n) => slotRegistrations.find((r) => r && r.name === n);
@@ -407,7 +500,8 @@ assert(Array.isArray(rowKids) && rowKids[0].props.children === "showInput" && ro
   "switch row carries a visible caption plus the platform switch");
 
 const modeProps = childrenOf(formChildren)[0].props;
-assert(modeProps.options.length === 2 && modeProps.value === "merged", "mode picker shows merged/split from the served value");
+assert(modeProps.options.length === 2 && modeProps.value === cfgValue.displayMode,
+  "mode picker reflects the served value ('" + cfgValue.displayMode + "') and offers merged/split");
 
 const summaryEl = renderCard(sectionEntry, { view: "summary" });
 assert(summaryEl.type === "p" && childrenOf(summaryEl) === "description", "summary view renders the one-liner");

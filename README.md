@@ -7,15 +7,22 @@ after each completed step. It is global: once enabled, every conversation gets i
 ## Features
 
 1. **Live in / out token counter** — after the deep-thinking indicator, a
-   "华光划过" (shimmer sweep) badge shows the streaming token count.
+   "华光划过" (shimmer sweep) badge shows the streaming token count, painted with
+   the platform's own shimmer so it reads as part of the same sentence.
    - `in N token` = input tokens, `out N token` = output tokens.
-   - Input tokens are authoritative (from the model's `usage`); the streaming
-     output count is a client-side estimate (CJK glyph ≈ 1 token, latin ≈ 4 chars/token),
-     then snaps to the authoritative value when the stream settles.
+   - The input count is the number the harness itself prices the prompt with
+     (its `contextPressure` projection), so it is live during the input phase and
+     does not wait for the provider's `usage`. When the provider does report
+     `inputTokens`, that authoritative figure takes precedence; when neither is
+     available yet, the last known input is reused.
+   - The streaming output count is a client-side estimate (CJK glyph ≈ 1 token,
+     latin ≈ 4 chars/token), then snaps to the authoritative value when the
+     stream settles.
 2. **Display mode (configurable)** — `merged` (default) or `split`.
-   - `merged`: shows only `in …` during the input phase and only `out …` while
-     generating (the phase flips as soon as the first output token streams).
-   - `split`: always shows `in … · out …` together.
+   - `merged`: the label swaps rather than stacking — only `in …` during the
+     input phase, only `out …` while generating (the phase flips as soon as the
+     first output token streams).
+   - `split`: always shows `in … · out …` together, for the whole turn.
 3. **In / out visibility (configurable)** — independent switches to show/hide
    the input and output counters (both on by default).
 4. **Per-operation "use N token" (configurable)** — after each completed
