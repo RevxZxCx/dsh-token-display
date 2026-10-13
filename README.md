@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/banner.webp" alt="Where Did My Tokens Go?" width="100%">
+  <img src="assets/branding/banner-en.webp" alt="Where Did My Tokens Go?" width="100%">
 </p>
 
 <div align="center">
