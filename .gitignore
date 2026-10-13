@@ -13,3 +13,8 @@ Thumbs.db
 # local-only review archives; never commit (scoped so real docs stay addable)
 /docs/review-*.md
 /.review_diff_*.txt
+
+# original screenshot captures; only the converted .webp files ship
+assets/**/*.png
+assets/**/*.jpg
+assets/**/*.jpeg
