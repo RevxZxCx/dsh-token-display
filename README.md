@@ -1,6 +1,6 @@
-# dsh-token-counter
+# Where Did My Tokens Go?
 
-A global DSH plugin that shows a **realtime token counter** right after the blue
+*我的 token 都去哪了？* A global DSH plugin that shows a **realtime token counter** right after the blue
 "深度思考 / 深度求索" (deep-thinking) indicator, plus **per-operation token usage**
 after each completed step. It is global: once enabled, every conversation gets it.
 
@@ -39,10 +39,10 @@ after each completed step. It is global: once enabled, every conversation gets i
    match that row, showing the tokens **that operation's own step** consumed
    (input + output, or the provider's `totalTokens` when it reports one) — never
    the whole reply's total. One switch toggles it; its own gear menu styles it.
-5. All options are configurable from four places: **设置 → Token 计数器**
-   (Settings → Token Counter), the same tab under **设置 → 内置插件**, the
-   configuration section on this bundle's page in the **插件 / Plugins** panel,
-   and the card in that panel's **官方 / Official** group.
+5. All options are configurable from three places: **设置 → Token 计数器**
+   (Settings → Token Counter), the configuration section on this bundle's page
+   in the **插件 / Plugins** panel, and the card in that panel's
+   **官方 / Official** group.
 6. **Visual settings UI** — a light white/grey, adaptive two-pane layout: merged
    and split each get a **preview card that recreates the real transcript scene**
    (a "Command finished · use N token" row and the deep-thinking badge with the
@@ -56,13 +56,13 @@ after each completed step. It is global: once enabled, every conversation gets i
 
 ```bash
 # 1. pack the plugin
-cd packages/dsh-token-counter
+cd packages/dsh-where-did-my-tokens-go
 pnpm pack
 
 # 2. install into the desktop profile
-dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
+dsh plugin --profile desktop add ./dsh-where-did-my-tokens-go-<version>.tgz
 # (or manually: add the tarball to the profile's package.json dependencies and
-#  append "dsh-token-counter" to dsh.profile.bundles, then `pnpm install`)
+#  append "dsh-where-did-my-tokens-go" to dsh.profile.bundles, then `pnpm install`)
 
 # 3. restart DSH
 ```
@@ -77,9 +77,9 @@ dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
 4. Open **设置 → Token 计数器**: hover a preview card to watch the numbers
    animate, click it to switch merged/split, and use the in / output / per-op
    toggles — the cards update in lockstep. Save when you are done. The same
-   form is also reachable as a tab under **设置 → 内置插件**, as the
-   configuration section on this bundle's page in the **插件 / Plugins** panel
-   ("dsh-token-counter" → 配置), and as the "Token 计数器" card in that panel's
+   form is also reachable as the configuration section on this bundle's page
+   in the **插件 / Plugins** panel
+   ("dsh-where-did-my-tokens-go" → 配置), and as the "Token 计数器" card in that panel's
    "官方 / Official" group.
    If the settings form reports "This plugin is not loaded, so it cannot be
    configured right now", the host half is not mounted — run

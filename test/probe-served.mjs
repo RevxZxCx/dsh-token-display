@@ -17,7 +17,7 @@ function artifactRevision(baseline) {
 }
 
 const root = "C:/Users/26903/.dsh/profiles/desktop/node_modules";
-const name = "dsh-token-counter";
+const name = "dsh-where-did-my-tokens-go";
 const clientPath = join(root, name, "lib", "client.js");
 const st = statSync(clientPath);
 const rev = artifactRevision(st);
@@ -27,14 +27,14 @@ const buf = Buffer.from(await res.arrayBuffer());
 const text = buf.toString("utf8");
 console.log(`status=${res.status} servedBytes=${buf.byteLength} diskBytes=${st.size} rev=${rev}`);
 console.log("contains buildBadge:", text.includes("buildBadge"));
-console.log("contains data-dsh-token-counter:", text.includes("data-dsh-token-counter"));
+console.log("contains data-dsh-where-did-my-tokens-go:", text.includes("data-dsh-where-did-my-tokens-go"));
 console.log("contains data-dsh-use-token:", text.includes("data-dsh-use-token"));
 console.log('contains inject=["sessions","slots","locale","configForms"]:', text.includes('["sessions", "slots", "locale", "configForms"]'));
 console.log("contains TokenCounterCard:", text.includes("TokenCounterCard"));
 console.log("labelled switch rows:", text.includes("dtc-switchRow"));
 console.log("no positional-jsx call sites (1.3.1):", !/jsxs\(\s*"[a-z]+",\s*\{[^{}]*\},\s*\n?\s*jsx\(/.test(text));
-console.log("platform shimmer geometry (1.3.2):", text.includes("dsh-token-counter-highlight"));
-console.log("counter-moving keyframes (1.3.2):", text.includes("@keyframes dsh-token-counter-highlight"));
+console.log("platform shimmer geometry (1.3.2):", text.includes("dsh-where-did-my-tokens-go-highlight"));
+console.log("counter-moving keyframes (1.3.2):", text.includes("@keyframes dsh-where-did-my-tokens-go-highlight"));
 console.log("inherits row shimmer color (1.3.2):", text.includes("--dsw-alias-label-shimmer"));
 console.log("reads contextPressure projection (1.3.2):", text.includes("contextPressure"));
 console.log("per-step usage records (1.3.5):", text.includes("recordStep") && text.includes("stepRecords"));

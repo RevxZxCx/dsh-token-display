@@ -1,4 +1,4 @@
-// Test harness for the dsh-token-counter client half (feature-set rewrite).
+// Test harness for the dsh-where-did-my-tokens-go client half (feature-set rewrite).
 // Runs the real lib/client.js factory in a mocked browser + sessions/configForms
 // service, feeds synthetic assistant/live-chunk deltas, and asserts:
 //   - factory registration + inject list
@@ -295,7 +295,7 @@ const vmRun = (src) => {
 };
 vmRun(clientSrc);
 
-assert(registration && registration.id === "dsh-token-counter", "factory registered with id dsh-token-counter");
+assert(registration && registration.id === "dsh-where-did-my-tokens-go", "factory registered with id dsh-where-did-my-tokens-go");
 
 const factoryRequire = (name) => {
   if (name === "react/jsx-runtime") return { jsx, jsxs, Fragment: Symbol("Fragment") };
@@ -421,12 +421,12 @@ function runPoll() {
 }
 
 function counterText() {
-  const span = runningContent.children.find((c) => c.getAttribute("data-dsh-token-counter") === "true");
+  const span = runningContent.children.find((c) => c.getAttribute("data-dsh-where-did-my-tokens-go") === "true");
   if (!span) return null;
   return span.children[0] ? span.children[0].textContent : null;
 }
 function counterSpan() {
-  return runningContent.children.find((c) => c.getAttribute("data-dsh-token-counter") === "true") || null;
+  return runningContent.children.find((c) => c.getAttribute("data-dsh-where-did-my-tokens-go") === "true") || null;
 }
 function useTokenText() {
   const span = processBtn.children.find((c) => c.getAttribute("data-dsh-use-token") === "true");
@@ -526,12 +526,12 @@ assert(counterText() === "in 6.1K token · out 1 token", "split during output ke
   assert(span !== null, "badge exists for structure checks");
   const content = span.children[0];
   const dec = span.children[1];
-  assert(content.className === "dsh-token-counter-content", "first layer is the static content");
+  assert(content.className === "dsh-where-did-my-tokens-go-content", "first layer is the static content");
   assert(dec.getAttribute("aria-hidden") === "true" && dec.getAttribute("inert") === "", "overlay is aria-hidden and inert");
   const sweep = dec.children[0];
-  assert(sweep.className === "dsh-token-counter-sweep", "overlay wraps the travelling mask");
+  assert(sweep.className === "dsh-where-did-my-tokens-go-sweep", "overlay wraps the travelling mask");
   const highlight = sweep.children[0];
-  assert(highlight.className === "dsh-token-counter-content dsh-token-counter-highlight", "mask wraps the counter-travelling highlight");
+  assert(highlight.className === "dsh-where-did-my-tokens-go-content dsh-where-did-my-tokens-go-highlight", "mask wraps the counter-travelling highlight");
   assert(highlight.textContent === content.textContent, "highlight duplicates the content text (masked tint, not a moving copy)");
 
   // A text change must land in BOTH layers, or the tint desyncs from the glyphs.
@@ -546,11 +546,11 @@ assert(counterText() === "in 6.1K token · out 1 token", "split during output ke
   const hl2 = span2.children[1].children[0].children[0];
   assert(hl2.textContent === span2.children[0].textContent,
     "highlight layer updated in lockstep (got '" + hl2.textContent + "')");
-  assert(styleStore.get("dsh-token-counter-style").textContent.includes("dsh-token-counter-highlight"), "counter-moving keyframes shipped");
-  assert(styleStore.get("dsh-token-counter-style").textContent.includes("--dsw-alias-label-shimmer"), "highlight color inherits the row's shimmer variable");
-  assert(styleStore.get("dsh-token-counter-style").textContent.includes("font:inherit"), "badge inherits the running row's font");
+  assert(styleStore.get("dsh-where-did-my-tokens-go-style").textContent.includes("dsh-where-did-my-tokens-go-highlight"), "counter-moving keyframes shipped");
+  assert(styleStore.get("dsh-where-did-my-tokens-go-style").textContent.includes("--dsw-alias-label-shimmer"), "highlight color inherits the row's shimmer variable");
+  assert(styleStore.get("dsh-where-did-my-tokens-go-style").textContent.includes("font:inherit"), "badge inherits the running row's font");
   {
-    const css = styleStore.get("dsh-token-counter-style").textContent;
+    const css = styleStore.get("dsh-where-did-my-tokens-go-style").textContent;
     assert(css.includes(".dtc-headTitle{margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);}"),
       "preview head follows the theme (readable on dark hosts)");
     assert(css.includes(".dtc-switches .dtc-headTitle{color:#1f2328;}"),
@@ -639,22 +639,21 @@ assert(counterText() === "in 6.1K token · out 1 token", "split during output ke
   assert(useTokenOf(r5a) !== useTokenOf(r5b), "reload: rows still differ (no shared total)");
 }
 
-// 6) settings surfaces registered (bundle config page + settings tab + item card)
+// 6) settings surfaces registered (bundle config page + settings section + item card)
 const bySlot = (n) => slotRegistrations.find((r) => r && r.name === n);
 const bundle = bySlot("plugins.bundle.config");
-assert(bundle && bundle.key === "dsh-token-counter", "bundle config seat keyed by the package name");
-const tab = bySlot("settings.plugins.tab");
-assert(tab && tab.id === "dsh-token-counter", "Plugins settings section tab registered");
-assert(tab && tab.order > 0 && typeof tab.label === "function", "settings tab has order + label");
-assert(tab && tab.locale === "settings.tokenCounter", "settings tab carries the locale namespace");
-const tabProps = tab && tab.inject();
-assert(tabProps && tabProps.section === true, "settings tab injects section:true");
-assert(tabProps && tabProps.hooks && tabProps.hooks.tokenCounterCard, "settings tab injects the form store");
+assert(bundle && bundle.key === "dsh-where-did-my-tokens-go", "bundle config seat keyed by the package name");
+// Regression: the duplicate page inside Settings → 内置插件 was removed. The
+// settings.section entry is the plugin's only page in the Settings panel.
+assert(bySlot("settings.plugins.tab") === undefined, "no duplicate settings.plugins.tab registration");
 const section = bySlot("settings.section");
-assert(section && section.id === "dsh-token-counter", "Settings navigation entry registered");
+assert(section && section.id === "dsh-where-did-my-tokens-go", "Settings navigation entry registered");
 assert(section && section.order > 0 && typeof section.label === "function", "settings section has order + label");
+const sectionProps = section && section.inject();
+assert(sectionProps && sectionProps.section === true, "settings section injects section:true");
+assert(sectionProps && sectionProps.hooks && sectionProps.hooks.tokenCounterCard, "settings section injects the form store");
 const item = bySlot("plugins.item");
-assert(item && item.id === "dsh-token-counter", "Plugins-page item card registered");
+assert(item && item.id === "dsh-where-did-my-tokens-go", "Plugins-page item card registered");
 assert(slotRegistrations.every((r) => r === undefined || typeof r.component === "function"), "every seat renders the card component");
 
 // ── 7) the card's render tree actually carries its children ──────────
@@ -675,12 +674,12 @@ function renderCard(registrationEntry, extraProps) {
 }
 const childrenOf = (el) => (el && el.props && el.props.children);
 
-for (const seatName of ["settings.section", "settings.plugins.tab", "plugins.bundle.config", "plugins.item"]) {
+for (const seatName of ["settings.section", "plugins.bundle.config", "plugins.item"]) {
   const entry = bySlot(seatName);
   if (!entry) continue;
   const tree = renderCard(entry, { view: "page" });
   assert(tree && tree.type !== "p", seatName + ": card renders an element tree");
-  if (seatName === "settings.section" || seatName === "settings.plugins.tab") {
+  if (seatName === "settings.section") {
     const kids = childrenOf(tree);
     assert(Array.isArray(kids) && kids.length === 3, seatName + ": section wrapper has heading + intro + form children");
     assert(tree.key === undefined, seatName + ": section wrapper passes no bogus react key");
@@ -944,7 +943,7 @@ const P = mod.preview;
   activeHooks = runner;
   const findBadge = (node) => {
     if (!node || typeof node !== "object") return null;
-    if (node.props && node.props["data-dsh-token-counter"] === "true") return node;
+    if (node.props && node.props["data-dsh-where-did-my-tokens-go"] === "true") return node;
     const kids = node.props && node.props.children;
     const list = Array.isArray(kids) ? kids : [kids];
     for (const k of list) { const hit = findBadge(k); if (hit) return hit; }
@@ -1046,7 +1045,7 @@ assert(summaryEl.type === "p" && childrenOf(summaryEl) === "description", "summa
 
 // ── cleanup ─────────────────────────────────────────────────────────
 for (const clean of effects) { try { clean(); } catch (e) {} }
-const spanAfterCleanup = runningContent.children.find((c) => c.getAttribute("data-dsh-token-counter") === "true");
+const spanAfterCleanup = runningContent.children.find((c) => c.getAttribute("data-dsh-where-did-my-tokens-go") === "true");
 assert(spanAfterCleanup === undefined, "cleanup removes the counter span");
 
 console.log(failures === 0 ? "\nALL TESTS PASSED" : `\n${failures} TEST(S) FAILED`);

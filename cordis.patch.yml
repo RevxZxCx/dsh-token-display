@@ -1,4 +1,4 @@
-# dsh-token-counter bundle patch: registers the token counter plugin.
+# dsh-where-did-my-tokens-go bundle patch: registers the token counter plugin.
 - insert:
-    - id: dsh-token-counter
-      name: dsh-token-counter
+    - id: dsh-where-did-my-tokens-go
+      name: dsh-where-did-my-tokens-go

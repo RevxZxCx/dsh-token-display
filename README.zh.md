@@ -1,4 +1,4 @@
-# dsh-token-counter
+# Where Did My Tokens Go?（我的 token 都去哪了？）
 
 一个全局 DSH 插件：在蓝色「深度思考 / 深度求索」指示器后面实时显示 token 计数器，并在每个已完成的操作后显示该操作的 token 消耗。插件是全局的——启用后所有对话都会生效。
 
@@ -17,7 +17,7 @@
 4. **每个操作后的 `use N token`（可配置）** —— 每个已完成操作（「已完成思考」「已完成命令」等）
    后面显示 `use N token`，样式与该行文字统一，展示**该操作自身那一步**消耗的 token
    （输入+输出，若供应商上报了 `totalTokens` 则以其为准），绝不是一整条回复的累计值。一个开关控制其显隐，其齿轮菜单单独配置该部位的字体/颜色/单位。
-5. 所有选项共有四个入口：**设置 → Token 计数器**、**设置 → 内置插件** 里的同名标签页、
+5. 所有选项共有三个入口：**设置 → Token 计数器**、
    **插件** 面板中本插件页面里的配置区，以及该面板「官方」分组里的「Token 计数器」卡片。
 6. **可视化配置界面** —— 白 / 浅灰浅色风格，自适应两栏布局：合并、分开两种模式各有一张
    **模拟真实对话场景的预览卡片**（含「已完成命令 use N token」行与带扫光的深度思考徽标，
@@ -27,13 +27,13 @@
 
 ```bash
 # 1. 打包插件
-cd packages/dsh-token-counter
+cd packages/dsh-where-did-my-tokens-go
 pnpm pack
 
 # 2. 安装到 desktop 配置
-dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
+dsh plugin --profile desktop add ./dsh-where-did-my-tokens-go-<version>.tgz
 # （或手动：把 tarball 加入配置的 package.json dependencies，
-#   并把 "dsh-token-counter" 追加到 dsh.profile.bundles，然后 `pnpm install`）
+#   并把 "dsh-where-did-my-tokens-go" 追加到 dsh.profile.bundles，然后 `pnpm install`）
 
 # 3. 重启 DSH
 ```
@@ -49,8 +49,8 @@ dsh plugin --profile desktop add ./dsh-token-counter-<version>.tgz
    会实时演示增长**（in 涨到上限后暂停，再切 / 再涨 out），移开即静止。点击卡片即可
    切换显示模式；右侧「显示内容」开关（in / out / use）一变，两张卡片同步更新，
    例如关掉 in，两张卡片都会立即不再显示 in token。改动完成后点击「保存」写入配置。
-   同一份表单还可从 **设置 → 内置插件** 的同名标签页、**插件** 面板中本插件页面里的配置区
-   （「dsh-token-counter」→ 配置），以及该面板「官方」分组里的「Token 计数器」卡片打开。
+   同一份表单还可从 **插件** 面板中本插件页面里的配置区
+   （「dsh-where-did-my-tokens-go」→ 配置），以及该面板「官方」分组里的「Token 计数器」卡片打开。
    若表单显示「该插件当前未加载，暂时无法配置」，说明宿主端未挂载：请先用
    `dsh --profile desktop --dump-config`（或查看配置目录的 `cordis.patch.yml`）确认后再提 issue。
 

@@ -1,6 +1,6 @@
 {
-  "name": "dsh-token-counter",
-  "version": "1.5.3",
+  "name": "dsh-where-did-my-tokens-go",
+  "version": "1.6.0",
   "description": "DSH plugin: realtime token counter after the deep-thinking indicator",
   "type": "module",
   "main": "lib/index.js",
