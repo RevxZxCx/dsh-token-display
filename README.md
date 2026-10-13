@@ -11,6 +11,7 @@
   [简体中文](README.zh.md) · [MIT License](LICENSE)
 
   [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+  [![npm package](https://img.shields.io/npm/v/dsh-where-did-my-tokens-go.svg?label=npm%20package)](https://www.npmjs.com/package/dsh-where-did-my-tokens-go)
   [![DSH Web Plugin](https://img.shields.io/badge/DSH%20Web-Plugin-0f766e.svg)](https://github.com/RevxZxCx/dsh-where-did-my-tokens-go)
   [![Tested on DSH 0.2.0-rc.2](https://img.shields.io/badge/DSH-tested%20on%200.2.0--rc.2-2563eb.svg)](#installation)
 </div>
@@ -57,7 +58,13 @@ Requires a working DeepSeek Harness installation. The commands below use the `de
 Send this to an agent that can operate your terminal:
 
 ```text
-Install the dsh-where-did-my-tokens-go plugin (https://github.com/RevxZxCx/dsh-where-did-my-tokens-go) into my DSH profile from GitHub, verify it is served after the install, and tell me how to reload.
+Install the dsh-where-did-my-tokens-go plugin from npm into my DSH profile, verify it is served after the install, and tell me how to reload.
+```
+
+### From npm (recommended)
+
+```bash
+dsh plugin --profile desktop add dsh-where-did-my-tokens-go
 ```
 
 ### From GitHub

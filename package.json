@@ -4,6 +4,14 @@
   "description": "DSH plugin: realtime token counter after the deep-thinking indicator",
   "type": "module",
   "main": "lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RevxZxCx/dsh-where-did-my-tokens-go.git"
+  },
+  "homepage": "https://github.com/RevxZxCx/dsh-where-did-my-tokens-go#readme",
+  "bugs": {
+    "url": "https://github.com/RevxZxCx/dsh-where-did-my-tokens-go/issues"
+  },
   "exports": {
     ".": {
       "default": "./lib/index.js"

@@ -11,6 +11,7 @@
   [English](README.md) · [MIT 许可证](LICENSE)
 
   [![许可证：MIT](https://img.shields.io/badge/许可证-MIT-green.svg)](LICENSE)
+  [![npm 包](https://img.shields.io/npm/v/dsh-where-did-my-tokens-go.svg?label=npm%20%E5%8C%85)](https://www.npmjs.com/package/dsh-where-did-my-tokens-go)
   [![DSH Web Plugin](https://img.shields.io/badge/DSH%20Web-Plugin-0f766e.svg)](https://github.com/RevxZxCx/dsh-where-did-my-tokens-go)
   [![DSH 0.2.0-rc.2 实测](https://img.shields.io/badge/DSH-0.2.0--rc.2%20%E5%AE%9E%E6%B5%8B-2563eb.svg)](#安装)
 </div>
@@ -57,7 +58,13 @@
 把这段话发给能够操作本机终端的 Agent：
 
 ```text
-请把 dsh-where-did-my-tokens-go（https://github.com/RevxZxCx/dsh-where-did-my-tokens-go）安装到我的 DSH profile，使用 GitHub 源，安装后确认已生效并告诉我如何重新加载。
+请把 npm 上的 dsh-where-did-my-tokens-go 安装到我的 DSH profile，安装后确认已生效并告诉我如何重新加载。
+```
+
+### 从 npm 安装（推荐）
+
+```bash
+dsh plugin --profile desktop add dsh-where-did-my-tokens-go
 ```
 
 ### 从 GitHub 安装
