@@ -18,7 +18,7 @@
 
 > Where Did My Tokens Go? is a community-maintained DeepSeek Harness (DSH) plugin, not an official DeepSeek AI product.
 
-This README describes **1.6.0**.
+This README describes **1.6.1**.
 
 ## Features
 
@@ -90,7 +90,7 @@ dsh plugin --profile desktop add ./dsh-where-did-my-tokens-go-<version>.tgz
 
 After installing, **restart DSH** and open any conversation — the badge appears once you send a message. Re-run the install command to update.
 
-- `1.6.0` is tested running on DeepSeek Harness `0.2.0-rc.2` (desktop profile, Windows).
+- `1.6.1` is tested running on DeepSeek Harness `0.2.0-rc.2` (desktop profile, Windows).
 
 ## Usage
 

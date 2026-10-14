@@ -151,6 +151,11 @@ turn2.appendChild(rowLive);
 const documentWalkTargets = [];
 
 const styleStore = new Map();
+// A REAL <head> element, not just an id table: the host's style bookkeeping
+// walks `style[data-plugin]` NODES, and a stub that only recorded ids could
+// never observe our sheet being adopted by another plugin and deleted, nor a
+// second sheet being injected under the same id.
+const head = makeElement("head");
 const document = {
   getElementById(id) { return styleStore.get(id) ?? null; },
   createElement(tag) { const e = makeElement(tag); return e; },
@@ -166,13 +171,37 @@ const document = {
         walk(c);
       }
     };
-    walk(running); walk(processGroup); walk(turn2);
+    walk(running); walk(processGroup); walk(turn2); walk(head);
     for (const extra of documentWalkTargets) walk(extra);
     // "button[data-process-activity]" matches processBtn via descendant walk
     return out;
   },
-  head: { appendChild(el) { /* style element; track by id */ if (el.id) styleStore.set(el.id, el); } }
+  head: { appendChild(el) { head.appendChild(el); if (el.id) styleStore.set(el.id, el); } }
 };
+
+// ── host module-system style bookkeeping (mocked) ───────────────────
+// Mirrors @deepseek-ai/dsh-client-modules: `claimStyles(id)` adopts every
+// UNTAGGED <style> for whichever plugin materializes next, and
+// `removeOwnedStyles(id)` deletes `style[data-plugin=<id>]` when that plugin is
+// invalidated or pruned. Without these the regression that produced the
+// duplicate badge — an unrelated plugin's hot reload deleting OUR untagged
+// stylesheet, leaving the decorative layer in flow — cannot be exercised.
+function hostClaimStyles(id) {
+  for (const el of head.children) {
+    if (el.tagName === "STYLE" && el.getAttribute("data-plugin") === null) el.setAttribute("data-plugin", id);
+  }
+}
+function hostRemoveOwnedStyles(id) {
+  for (const el of head.children.slice()) {
+    if (el.tagName === "STYLE" && el.getAttribute("data-plugin") === id) {
+      el.remove();
+      if (el.id) styleStore.delete(el.id);
+    }
+  }
+}
+function styleElementsInHead() {
+  return head.children.filter((el) => el.tagName === "STYLE");
+}
 
 // ── window globals ──────────────────────────────────────────────────
 let rafQueue = [];
@@ -573,6 +602,91 @@ assert(counterText() === "in 6.1K token · out 1 token", "split during output ke
     assert(!/[^.\w-]\.dtc-cardOn\{/.test(css),
       "no bare .dtc-cardOn rule that would depend on source order");
   }
+}
+
+// 5e) THE DUPLICATE-BADGE BUG. When the injected stylesheet is missing, the
+// decorative overlay is no longer taken out of flow, so its mirrored copy of the
+// counter renders as a second, visible badge glued to the first one
+// ("...tokenin ...token"). Two independent defences are asserted here: the
+// overlay carries its own inline positioning, and a dropped <style> is
+// re-asserted on the next sync.
+{
+  const span = counterSpan();
+  const dec = span.children[1];
+  assert(dec.style.position === "absolute",
+    "overlay positions itself inline (stays hidden without the stylesheet)");
+  assert(dec.style.inset === "0" && dec.style.overflow === "clip",
+    "overlay is pinned and clipped inline, never an in-flow second copy");
+  assert(span.style.position === "relative" && span.style.display === "inline-grid",
+    "badge root is an inline-grid anchor inline, not only via CSS");
+  const sweep = dec.children[0];
+  assert(sweep.style.position === "absolute" && sweep.style.overflow === "hidden",
+    "sweep layer is positioned inline too");
+
+  // A host reload that drops our <style> must not leave the badge degraded:
+  // the next sync re-injects it. The NODE goes too — a stub that only cleared
+  // the id table would leave the element in <head> and mask a double injection.
+  styleStore.get("dsh-where-did-my-tokens-go-style")?.remove();
+  styleStore.delete("dsh-where-did-my-tokens-go-style");
+  assert(!styleStore.has("dsh-where-did-my-tokens-go-style"), "stylesheet removed for the regression check");
+  assert(styleElementsInHead().length === 0, "the stylesheet node is gone from <head> too");
+  runPoll();
+  assert(styleStore.has("dsh-where-did-my-tokens-go-style"),
+    "a dropped stylesheet is re-injected on the next sync");
+  assert((styleStore.get("dsh-where-did-my-tokens-go-style")?.textContent ?? "").includes("dsh-where-did-my-tokens-go-dec{position:absolute"),
+    "the re-injected stylesheet still hides the decorative layer");
+
+  // The sheet is tagged as OURS. The host's `claimStyles` adopts every UNTAGGED
+  // <style> for whichever plugin materializes next, and `removeOwnedStyles`
+  // deletes `style[data-plugin=<id>]` on that plugin's invalidate/prune — an
+  // untagged sheet could thus be deleted by an unrelated plugin's hot reload.
+  // The expected owner is DERIVED from the registered module id, never a second
+  // hand-copied literal: if `STYLE_OWNER` in lib/client.js ever drifts from the
+  // id the factory registers under (this plugin was renamed once already), the
+  // host would neither clean up nor claim our sheet, and this must fail.
+  const OWNER = registration.id;
+  const sheet = styleStore.get("dsh-where-did-my-tokens-go-style");
+  assert(sheet?.getAttribute("data-plugin") === OWNER,
+    "stylesheet is pre-tagged with the module's own id (got " + JSON.stringify(sheet?.getAttribute("data-plugin")) + ", want " + JSON.stringify(OWNER) + ")");
+
+  // Drive the REAL host path, not just the attribute: an unrelated plugin
+  // materializes (claiming untagged sheets), then hot-reloads (deleting
+  // `style[data-plugin=<other>]`). Our tagged sheet must survive both.
+  hostClaimStyles("some-other-plugin");
+  assert(sheet?.getAttribute("data-plugin") === OWNER,
+    "an unrelated plugin's materialization does NOT adopt our sheet");
+  hostRemoveOwnedStyles("some-other-plugin");
+  assert(styleStore.has("dsh-where-did-my-tokens-go-style"),
+    "an unrelated plugin's hot reload does NOT delete our sheet");
+
+  // And the reverse: when WE are invalidated the host removes our sheet, which
+  // is exactly when apply() re-runs and re-injects it.
+  hostRemoveOwnedStyles(OWNER);
+  assert(!styleStore.has("dsh-where-did-my-tokens-go-style"),
+    "our own invalidation drops the sheet (host removes style[data-plugin=<ours>])");
+  runPoll();
+  assert(styleStore.has("dsh-where-did-my-tokens-go-style"),
+    "the next sync re-injects the sheet after our own invalidation");
+
+  // ensureStyle() is idempotent: re-asserting it every sync must never stack a
+  // second <style> under the same id (a duplicate sheet would double every rule).
+  runPoll(); runPoll();
+  assert(styleElementsInHead().length === 1,
+    "exactly one injected stylesheet in <head> (got " + styleElementsInHead().length + ")");
+
+  // A stale badge left behind in the same container is swept, so exactly one
+  // counter can ever be painted on a row. The live badge is captured BEFORE the
+  // stray is injected: comparing `badges[0]` against a fresh `counterSpan()`
+  // would be tautological (both pick the first match of the same predicate) and
+  // could not tell "stray removed" from "live badge removed".
+  const liveBadge = counterSpan();
+  const stray = makeElement("span");
+  stray.setAttribute("data-dsh-where-did-my-tokens-go", "true");
+  runningContent.appendChild(stray);
+  runPoll();
+  const badges = runningContent.children.filter((c) => c.getAttribute("data-dsh-where-did-my-tokens-go") === "true");
+  assert(badges.length === 1, "a stale badge in the same row is removed (got " + badges.length + ")");
+  assert(badges[0] === liveBadge, "the surviving badge is the live one, not the stray");
 }
 
 // 5f) per-OPERATION attribution: two completed operations in ONE reply must show
@@ -978,6 +1092,14 @@ const P = mod.preview;
   assert(badge.props["data-dtc-live"] === "false", "idle card is not live");
   assert(findOpRow(rendered) !== null, "mounted card includes the use-token operation row");
 
+  // The preview shares the live badge markup, so it must carry the same inline
+  // structural styles: without them a missing stylesheet would paint the
+  // decorative layer as a second copy of the counter.
+  assert(badge.props.style && badge.props.style.position === "relative",
+    "preview badge carries the inline root layout (never degrades to a plain span)");
+  assert(badge.props.children[1] === null,
+    "idle preview renders no decorative layer at all (nothing to double)");
+
   // Hover: the climb starts from zero and advances on each timer tick.
   rendered.props.onMouseEnter();
   rendered = draw(baseProps);
@@ -986,6 +1108,13 @@ const P = mod.preview;
   assert(timerId > 1, "the hover animation registered its own interval (the live poll is id 1)");
   assert(badge.props["data-dtc-live"] === "true", "hover marks the card live");
   assert(badgeTextOf(badge) === "in 0 token", "hover frame starts the in climb at 0 (got '" + badgeTextOf(badge) + "')");
+  {
+    const dec = badge.props.children[1];
+    assert(dec && dec.props.style && dec.props.style.position === "absolute",
+      "hover preview's decorative layer is inline-absolute (no second visible copy without CSS)");
+    assert(dec.props["aria-hidden"] === "true",
+      "hover preview's decorative layer is aria-hidden (assistive tech never reads it twice)");
+  }
   intervals.get(timerId)();
   rendered = draw(baseProps);
   const climbed = badgeTextOf(findBadge(rendered));
