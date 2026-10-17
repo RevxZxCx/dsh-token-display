@@ -387,10 +387,10 @@ const sessions = {
 
 // ── mock configForms service ────────────────────────────────────────
 let cfgValue = {
-  displayMode: "merged", showInput: true, showOutput: true, showThink: true, showPerOp: true,
-  inputUnit: "auto", outputUnit: "auto", thinkUnit: "auto", perOpUnit: "auto",
-  inputFont: 0, outputFont: 0, thinkFont: 0, perOpFont: 0,
-  inputColor: "", outputColor: "", thinkColor: "", perOpColor: "",
+  displayMode: "merged", showInput: true, showOutput: true, showPerOp: true,
+  inputUnit: "auto", outputUnit: "auto", perOpUnit: "auto",
+  inputFont: 0, outputFont: 0, perOpFont: 0,
+  inputColor: "", outputColor: "", perOpColor: "",
 };
 // cfgValue writes in tests keep working without restating the twelve style
 // fields: mutate through this helper for the mode/boolean fields only.
@@ -547,133 +547,83 @@ assert(counterText() === "in 6.1K token · out 1 token", "split during output ke
   projectedTokens = 6100;                   // restore for later checks
 }
 
-// 5c-3) the reasoning split: `think` is the reasoning share INSIDE `out`
-// (out = think + answer), so the two numbers must never be added together and
-// `think` must never exceed `out`.
+// 5c-3) reasoning text counts into the OUTPUT total and is never printed as a
+// figure of its own: the provider's outputTokens includes the thinking text, so
+// `out` climbs while the model reasons, and a reasoningTokens field in a usage
+// payload is ignored — the think/answer split is gone.
 {
-  setCfg({ displayMode: "merged", showInput: true, showOutput: true, showThink: true, showPerOp: true });
+  setCfg({ displayMode: "merged", showInput: true, showOutput: true, showPerOp: true });
   if (cfgListener) cfgListener();
   binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
   flushRaf();
-  // Reasoning streams FIRST. During that phase every output token so far IS a
-  // reasoning token, so merged labels the running number `think`.
+  // Reasoning streams FIRST, and its text is part of the output total, so the
+  // merged badge keeps labelling the running number `out` while thinking.
   binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("reasoning-delta", "思考思考思考思考") } } }]);
   flushRaf();
-  assert(counterText() === "think 8 token", "merged thinking phase labels the running number think (got '" + counterText() + "')");
+  assert(counterText() === "out 8 token", "merged counts reasoning text into out while thinking (got '" + counterText() + "')");
 
-  // The disclosure gate: in split mode the thinking phase must NOT print the
-  // reasoning share, because the reasoning text IS the output so far — the two
-  // numbers would be the same one twice. (Removing the gate keeps every other
-  // assertion here green, so this is the test that pins it.)
-  setCfg({ displayMode: "split", showThink: true });
+  // Split mode shows that same single output figure beside the input.
+  setCfg({ displayMode: "split" });
   if (cfgListener) cfgListener();
   flushRaf();
   assert(counterText() === "in 6.1K token · out 8 token",
-    "split withholds think while still thinking (got '" + counterText() + "')");
+    "split shows in and out while still thinking (got '" + counterText() + "')");
   setCfg({ displayMode: "merged" });
   if (cfgListener) cfgListener();
   flushRaf();
 
-  // The visible answer starts: the total counts BOTH texts, the think share
-  // keeps only the reasoning one.
+  // The visible answer joins the same total — it is not a separate figure.
   binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("text-delta", "abcd") } } }]);
   flushRaf();
-  assert(counterText() === "out 9 token · think 8 token",
-    "merged answering phase shows out (reasoning + answer) beside its think share (got '" + counterText() + "')");
+  assert(counterText() === "out 9 token",
+    "merged answering phase shows the running output total (got '" + counterText() + "')");
+  setCfg({ displayMode: "split" });
+  if (cfgListener) cfgListener();
+  flushRaf();
+  assert(counterText() === "in 6.1K token · out 9 token",
+    "split shows in and out together (got '" + counterText() + "')");
+  setCfg({ displayMode: "merged" });
+  if (cfgListener) cfgListener();
+  flushRaf();
 
-  // A first answer chunk that carries no countable token (whitespace) must not
-  // make the badge print one number twice: out === think is not yet information.
+  // A first answer chunk that carries no countable token (whitespace) changes
+  // nothing: the total keeps counting both texts.
   binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
   flushRaf();
   binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("reasoning-delta", "思考思考思考思考") } } }]);
   binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("text-delta", "   ") } } }]);
   flushRaf();
-  assert(counterText() === "out 8 token", "a whitespace-only answer chunk suppresses the duplicate share (got '" + counterText() + "')");
+  assert(counterText() === "out 8 token", "a whitespace-only answer chunk adds nothing to the total (got '" + counterText() + "')");
 
-  // Split mode keeps every enabled number on screen once the share is real.
-  // A countable answer chunk separates out from think, so the gate opens.
-  binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("text-delta", "abcd") } } }]);
-  setCfg({ displayMode: "split", showThink: true });
-  if (cfgListener) cfgListener();
-  flushRaf();
-  assert(counterText() === "in 6.1K token · out 9 token · think 8 token",
-    "split shows in, out and think together (got '" + counterText() + "')");
-
-  // The think switch is independent: off restores the pre-feature rendering.
-  setCfg({ displayMode: "split", showThink: false });
-  if (cfgListener) cfgListener();
-  flushRaf();
-  assert(counterText() === "in 6.1K token · out 9 token",
-    "showThink off leaves the badge exactly as it was before the option existed (got '" + counterText() + "')");
-
-  // Authoritative settle: the provider's own reasoningTokens replaces both the
-  // estimate and the total.
-  setCfg({ displayMode: "split", showThink: true });
+  // Settled usage: reasoningTokens is not a figure this plugin prints any more —
+  // only the provider's own in/out totals are shown.
+  setCfg({ displayMode: "split" });
   if (cfgListener) cfgListener();
   binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 20, step: 0, usage: { inputTokens: 500, outputTokens: 100, reasoningTokens: 40 } } } }]);
   flushRaf();
-  assert(counterText() === "in 500 token · out 100 token · think 40 token",
-    "settled usage reports the authoritative reasoning share (got '" + counterText() + "')");
+  assert(counterText() === "in 500 token · out 100 token",
+    "settled usage ignores reasoningTokens (got '" + counterText() + "')");
 
-  // The live badge's `think` segment must read ITS OWN site's font/color — not
-  // the output site's. (With the defaults the two are identical, so pointing the
-  // mapping at the output site would otherwise stay invisible to the suite.)
-  setCfg({ thinkFont: 18, thinkColor: "#00ff00", outputFont: 0, outputColor: "" });
-  if (cfgListener) cfgListener();
-  flushRaf();
-  {
-    const segsOf = (layer) => layer.children.filter((c) => c.className === "dtc-seg");
-    const liveSegs = segsOf(counterSpan().children[0]);
-    const thinkSeg = liveSegs.find((c) => c.dataset.dtcSite === "think");
-    const outSeg = liveSegs.find((c) => c.dataset.dtcSite === "out");
-    assert(thinkSeg !== undefined, "the live badge emits a think segment once settled");
-    assert(thinkSeg.style.fontSize === "18px" && thinkSeg.style.color === "#00ff00",
-      "the live think segment carries the think site's font/color (fontSize=" + thinkSeg.style.fontSize + " color=" + thinkSeg.style.color + ")");
-    assert(outSeg.style.fontSize === undefined && outSeg.style.color === undefined,
-      "the live out segment is unaffected by the think site's style");
-  }
-  setCfg({ thinkFont: 0, thinkColor: "" });
-  if (cfgListener) cfgListener();
-  flushRaf();
-
-  // A provider that reports a total but no reasoning breakdown must not let the
-  // heuristic print a think figure larger than the output it is a share of — and
-  // when the clamp makes the estimate EQUAL the total, printing it would claim
-  // "this step reasoned only", which is unproven: the heuristic is at least the
-  // answer text's size, so an equal pair here means the clamp fired, not that the
-  // answer was empty. An equal pair is therefore trusted only when the share is
-  // the provider's own reasoningTokens (next block), never when it is a clamped
-  // estimate.
-  binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
-  flushRaf();
-  binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: chunk("reasoning-delta", "思考思考思考思考") } } }]);
-  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 21, step: 0, usage: { inputTokens: 700, outputTokens: 3 } } } }]);
-  flushRaf();
-  assert(counterText() === "in 700 token · out 3 token",
-    "a clamped estimate equal to the total is withheld rather than claimed as 'reasoned only' (got '" + counterText() + "')");
-
-  // …but an AUTHORITATIVE share equal to the total IS information: the provider
-  // says the whole step was reasoning, so the share must print.
-  binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
-  flushRaf();
-  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 22, step: 0, usage: { inputTokens: 700, outputTokens: 30, reasoningTokens: 30 } } } }]);
-  flushRaf();
-  assert(counterText() === "in 700 token · out 30 token · think 30 token",
-    "an authoritative share equal to the total is still disclosed (got '" + counterText() + "')");
-
-  // The live `usage` CHUNK carries reasoningTokens too (not only the settled
-  // assistant/message event) — a provider that streams usage before the settle
-  // must produce the same share.
+  // The live usage chunk path is the same: the reasoning share is dropped, the
+  // authoritative in/out snapshot is kept.
   binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
   flushRaf();
   binding.eventSource._emit("append", [{ type: "transient", event: { type: "assistant/live-chunk", data: { chunk: { type: "usage", usage: { inputTokens: 800, outputTokens: 60, reasoningTokens: 25 } } } } }]);
   flushRaf();
-  assert(counterText() === "in 800 token · out 60 token · think 25 token",
-    "a live usage chunk reports the reasoning share (got '" + counterText() + "')");
+  assert(counterText() === "in 800 token · out 60 token",
+    "a live usage chunk ignores reasoningTokens (got '" + counterText() + "')");
+
+  // An authoritative share EQUAL to the total is not information either now:
+  // the whole step's cost is already the output figure.
+  binding.eventSource._emit("append", [{ type: "event", event: { type: "assistant/message", data: { turn: 21, step: 0, usage: { inputTokens: 700, outputTokens: 30, reasoningTokens: 30 } } } }]);
+  flushRaf();
+  assert(counterText() === "in 700 token · out 30 token",
+    "a reasoning share equal to the total prints no extra figure (got '" + counterText() + "')");
+  assert(!/think/.test(counterText()), "no configuration prints a think figure any more");
 
   // Back to a clean default for the sections that follow: a fresh step clears
   // the authoritative figures so the next block exercises the projection again.
-  setCfg({ displayMode: "merged", showThink: true });
+  setCfg({ displayMode: "merged" });
   if (cfgListener) cfgListener();
   projectedTokens = 6100;
   binding.eventSource._emit("append", [{ type: "event", event: { type: "step/start" } }]);
@@ -983,11 +933,11 @@ assert(switchesSection.props.className === "dtc-switches", "second section is th
 const switchKids = childrenOf(switchesSection);
 assert(switchKids[0].type === "h3", "switch panel has its own heading");
 const switchRows = switchKids.slice(1);
-assert(switchRows.length === 4 && switchRows.every((r) => r.props.className === "dtc-switchRow"),
-  "four labelled switch rows");
+assert(switchRows.length === 3 && switchRows.every((r) => r.props.className === "dtc-switchRow"),
+  "three labelled switch rows");
 const rowKids = childrenOf(switchRows[0]);
 assert(rowKids[0].props.children === "showInput", "switch row keeps its visible caption");
-assert(childrenOf(switchRows[2])[0].props.children === "showThink", "the third row is the think switch");
+assert(childrenOf(switchRows[2])[0].props.children === "showPerOp", "the third row is the per-operation switch");
 // the caption's partner is now a control cluster: gear button + platform switch
 const ctlKids = childrenOf(rowKids[1]);
 assert(rowKids[1].props.className === "dtc-switchCtl", "caption pairs with the control cluster");
@@ -1051,190 +1001,115 @@ assert(ctlKids.some((c) => c.type === primitivesMock.Switch), "the platform swit
 // ── 7d) preview state machine (pure logic behind the hover animation) ─
 const P = mod.preview;
 {
-  // merged: in climbs to its cap, pauses, then think, then out, then done.
-  let f = P.startFrame(true, true, true);
+  // merged: in climbs to its cap, pauses, then out, then done.
+  let f = P.startFrame(true, true);
   const samples = [];   // [stageBeforeTick, value] — the switch tick still counts as the old stage
   let guard = 0;
   while (f && !f.done && guard++ < 500) {
     const before = f.stage;
     const value = f.values[before];
-    f = P.advance(f, P.stages(true, true, true));
+    f = P.advance(f, P.stages(true, true));
     samples.push([before, value]);
-    // The reasoning share is a SUBSET of the output total, so the preview must
-    // never render a `think` larger than the `out` it belongs to.
-    assert(f.values.out >= f.values.think, "merged preview keeps out >= think (out=" + f.values.out + " think=" + f.values.think + ")");
   }
   assert(f && f.done && guard < 500, "merged preview animation terminates");
   assert(samples[0][0] === "in", "merged runs in first");
   const stagesSeen = [...new Set(samples.map(([s]) => s))];
-  assert(stagesSeen.join(",") === "in,think,out", "merged runs in -> think -> out in that order (got '" + stagesSeen.join(",") + "')");
-  for (const [kind, cap] of [["in", P.FAKE_IN], ["think", P.FAKE_THINK], ["out", P.FAKE_OUT]]) {
+  assert(stagesSeen.join(",") === "in,out", "merged runs in -> out in that order (got '" + stagesSeen.join(",") + "')");
+  for (const [kind, cap] of [["in", P.FAKE_IN], ["out", P.FAKE_OUT]]) {
     const peak = Math.max(...samples.filter(([s]) => s === kind).map(([, v]) => v));
     assert(peak === cap, "merged " + kind + " climbs to its own cap (" + peak + " vs " + cap + ")");
   }
   assert(Math.max(...samples.map(([, v]) => v)) <= Math.max(P.FAKE_IN, P.FAKE_OUT), "numbers never exceed the caps");
 
-  // merged with in only: climbs to FAKE_IN and stops (no swap to the later stages).
-  let f2 = P.startFrame(true, false, false);
+  // merged with in only: climbs to FAKE_IN and stops (no swap to the later stage).
+  let f2 = P.startFrame(true, false);
   let guard2 = 0;
-  while (f2 && !f2.done && guard2++ < 500) f2 = P.advance(f2, P.stages(true, false, false));
+  while (f2 && !f2.done && guard2++ < 500) f2 = P.advance(f2, P.stages(true, false));
   assert(f2.stage === "in" && f2.values.in === P.FAKE_IN, "merged in-only ends parked on the in cap");
 
   // A stage whose switch is off is never animated at all.
-  assert(P.stages(true, false, false).join(",") === "in", "showOutput/showThink off leaves only the in stage");
-  assert(P.stages(false, true, true).join(",") === "think,out", "showInput off drops the in stage");
-  assert(P.stages(false, false, false).join(",") === "", "every switch off -> no stages");
+  assert(P.stages(true, false).join(",") === "in", "showOutput off leaves only the in stage");
+  assert(P.stages(false, true).join(",") === "out", "showInput off leaves only the out stage");
+  assert(P.stages(false, false).join(",") === "", "every switch off -> no stages");
 
   // preview segments read a sites fixture: { site: {unit,font,color} }
   const AUTO_SITES = {
     input: { unit: "auto", font: 0, color: "" },
     output: { unit: "auto", font: 0, color: "" },
-    think: { unit: "auto", font: 0, color: "" },
     perOp: { unit: "auto", font: 0, color: "" },
   };
-  const frameOf = (over) => ({ index: 0, stage: "in", values: { in: 0, think: 0, out: 0 }, hold: 0, done: false, ...over });
-  const segText = (mode, frame, showIn, showOut, showThink, sites) =>
-    P.segmentsText(P.badgeSegments(mode, frame, showIn, showOut, showThink, sites || AUTO_SITES));
+  const frameOf = (over) => ({ index: 0, stage: "in", values: { in: 0, out: 0 }, hold: 0, done: false, ...over });
+  const segText = (mode, frame, showIn, showOut, sites) =>
+    P.segmentsText(P.badgeSegments(mode, frame, showIn, showOut, sites || AUTO_SITES));
 
-  // split: in fills first, then think, then out, and every enabled number stays
-  // in the text once it has been reached.
-  let f3 = P.startFrame(true, true, true);
+  // split: in fills first, then out, and every enabled number stays in the text
+  // once it has been reached.
+  let f3 = P.startFrame(true, true);
   let sawAll = false;
   let guard3 = 0;
   while (f3 && !f3.done && guard3++ < 500) {
-    f3 = P.advance(f3, P.stages(true, true, true));
-    const text = segText("split", f3, true, true, true);
-    if (/in [\d.]+[A-Z]* token · out [\d.]+[A-Z]* token · think [\d.]+[A-Z]* token/.test(text)) sawAll = true;
-    assert(f3.values.in <= P.FAKE_IN && f3.values.out <= P.FAKE_OUT && f3.values.think <= P.FAKE_THINK, "split values stay under caps");
-    assert(f3.values.out >= f3.values.think, "split preview keeps out >= think (out=" + f3.values.out + " think=" + f3.values.think + ")");
+    f3 = P.advance(f3, P.stages(true, true));
+    const text = segText("split", f3, true, true);
+    if (/in [\d.]+[A-Z]* token · out [\d.]+[A-Z]* token/.test(text)) sawAll = true;
+    assert(f3.values.in <= P.FAKE_IN && f3.values.out <= P.FAKE_OUT, "split values stay under caps");
   }
-  assert(f3.done && f3.values.in === P.FAKE_IN && f3.values.out === P.FAKE_OUT && f3.values.think === P.FAKE_THINK,
-    "split fills in, think and out to caps");
-  assert(sawAll, "split text shows in, out AND think together");
-  // The idle card is the finished state, so it must satisfy the same invariant
-  // whenever both figures are actually rendered (`out` switched off claims
-  // nothing, so a hidden `out` is exempt).
-  for (const [showIn, showOut, showThink] of [[true, true, true], [false, true, true], [true, true, false]]) {
-    const idleFrame = P.idleFrame(showIn, showOut, showThink);
-    assert(idleFrame.values.out >= idleFrame.values.think,
-      "idle preview keeps out >= think (out=" + idleFrame.values.out + " think=" + idleFrame.values.think + ")");
+  assert(f3.done && f3.values.in === P.FAKE_IN && f3.values.out === P.FAKE_OUT,
+    "split fills in and out to caps");
+  assert(sawAll, "split text shows in AND out together");
+  // The idle card is the finished state, so it must hold the same caps whenever
+  // both figures are actually rendered.
+  for (const [showIn, showOut] of [[true, true], [false, true], [true, false]]) {
+    const idleFrame = P.idleFrame(showIn, showOut);
+    assert(idleFrame.values.in === (showIn ? P.FAKE_IN : 0) && idleFrame.values.out === (showOut ? P.FAKE_OUT : 0),
+      "idle preview parks on the caps of the enabled figures (in=" + idleFrame.values.in + " out=" + idleFrame.values.out + ")");
   }
 
   // badge text respects the switches: in hidden -> never shows "in".
-  const mergedInText = segText("merged", frameOf({ stage: "in", values: { in: 500, think: 0, out: 0 } }), false, true, true);
+  const mergedInText = segText("merged", frameOf({ stage: "in", values: { in: 500, out: 0 } }), false, true);
   assert(mergedInText === "" || /^out /.test(mergedInText), "merged hides in when showInput is off (got '" + mergedInText + "')");
-  const splitText = segText("split", frameOf({ values: { in: 100, think: 0, out: 20 } }), false, true, false);
+  const splitText = segText("split", frameOf({ values: { in: 100, out: 20 } }), false, true);
   assert(splitText === "out 20 token", "split drops the in segment when showInput is off (got '" + splitText + "')");
 
-  // the think segment follows its own switch, in both modes.
-  const withThink = segText("split", frameOf({ stage: "out", values: { in: 100, think: 30, out: 200 } }), true, true, true);
-  assert(withThink === "in 100 token · out 200 token · think 30 token", "split appends the think segment (got '" + withThink + "')");
-  const noThink = segText("split", frameOf({ stage: "out", values: { in: 100, think: 30, out: 200 } }), true, true, false);
-  assert(noThink === "in 100 token · out 200 token", "showThink off removes the think segment (got '" + noThink + "')");
-  const zeroThink = segText("split", frameOf({ stage: "out", values: { in: 100, think: 0, out: 200 } }), true, true, true);
-  assert(zeroThink === "in 100 token · out 200 token", "a zero reasoning share never prints a 'think 0' segment (got '" + zeroThink + "')");
-  // The disclosure gate mirrors the live badge: while the thinking stage runs the
-  // reasoning text IS the output so far, so printing both would repeat one running
-  // number. The share appears once the answering stage is reached (or the
-  // animation has finished, which is what the idle frame below exercises).
-  const splitThinking = segText("split", frameOf({ stage: "think", values: { in: 900, think: 30, out: 30 } }), true, true, true);
-  assert(splitThinking === "in 900 token · out 30 token", "split withholds think while still thinking (got '" + splitThinking + "')");
-  const splitAnswered = segText("split", frameOf({ stage: "out", values: { in: 900, think: 30, out: 200 } }), true, true, true);
-  assert(splitAnswered === "in 900 token · out 200 token · think 30 token", "split discloses think once answering (got '" + splitAnswered + "')");
-  const splitDone = segText("split", frameOf({ stage: "think", values: { in: 900, think: 30, out: 30 }, done: true }), true, true, true);
-  assert(splitDone === "in 900 token · out 30 token · think 30 token", "a finished frame discloses the share even on the thinking stage (got '" + splitDone + "')");
-  // merged: while thinking only the reasoning number is on screen; once the
-  // answering stage runs, the output total carries the reasoning share beside it.
-  const mergedThink = segText("merged", frameOf({ stage: "think", values: { in: 900, think: 30, out: 0 } }), true, true, true);
-  assert(mergedThink === "think 30 token", "merged thinking stage shows only the think number (got '" + mergedThink + "')");
-  const mergedAnswer = segText("merged", frameOf({ stage: "out", values: { in: 900, think: 30, out: 200 } }), true, true, true);
-  assert(mergedAnswer === "out 200 token · think 30 token", "merged answering stage shows out with its think share (got '" + mergedAnswer + "')");
-  const mergedNoThink = segText("merged", frameOf({ stage: "think", values: { in: 900, think: 30, out: 0 } }), true, true, false);
-  assert(mergedNoThink === "", "merged think stage prints nothing when its switch is off (got '" + mergedNoThink + "')");
-
-  // The two preview defects the review found, pinned at the segment level.
-  // (a) The think stage OPENS on zero — the first hover render and the two hold
-  // ticks carry think 0 — and a zero share must print nothing, exactly like the
-  // live badge, which never labels a running number `think 0 token`.
-  const mergedThinkZero = segText("merged", frameOf({ stage: "think", values: { in: 0, think: 0, out: 0 } }), true, true, true);
-  assert(mergedThinkZero === "", "merged think stage at zero prints no 'think 0 token' (got '" + mergedThinkZero + "')");
-  const mergedThinkZeroNoIn = segText("merged", frameOf({ stage: "think", values: { in: 0, think: 0, out: 0 } }), false, true, true);
-  assert(mergedThinkZeroNoIn === "", "merged think-at-zero with showInput off still prints nothing (got '" + mergedThinkZeroNoIn + "')");
-  // (b) The answering stage STARTS at out === think (reasoning text is the output
-  // so far), so those first ticks must not print the same number twice.
-  const mergedOutEqualsThink = segText("merged", frameOf({ stage: "out", values: { in: 900, think: 212, out: 212 } }), true, true, true);
-  assert(mergedOutEqualsThink === "out 212 token", "merged answering start with out === think prints the total once (got '" + mergedOutEqualsThink + "')");
-  const splitOutEqualsThink = segText("split", frameOf({ stage: "out", values: { in: 900, think: 212, out: 212 } }), true, true, true);
-  assert(splitOutEqualsThink === "in 900 token · out 212 token", "split answering start with out === think prints the total once (got '" + splitOutEqualsThink + "')");
-  // …but a FINISHED frame with out === think IS information: the step reasoned
-  // only, so the share is the whole output.
-  const doneOutEqualsThink = segText("merged", frameOf({ stage: "out", values: { in: 900, think: 212, out: 212 }, done: true }), true, true, true);
-  assert(doneOutEqualsThink === "out 212 token · think 212 token", "a finished frame still discloses an equal share (got '" + doneOutEqualsThink + "')");
-  // With showOutput off there is no total on screen to duplicate, so the share
-  // prints as soon as it is disclosed.
-  const noOutEqual = segText("split", frameOf({ stage: "out", values: { in: 900, think: 212, out: 212 } }), true, false, true);
-  assert(noOutEqual === "in 900 token · think 212 token", "with showOutput off the share prints even when equal (got '" + noOutEqual + "')");
-
-  // The preview's disclosure rule must agree with the LIVE badge's on the one
-  // case that matters: split mode, still thinking. Both withhold the share.
-  {
-    const thinkingFrame = P.advance(P.startFrame(false, true, true), P.stages(false, true, true));
-    const previewText = P.segmentsText(P.badgeSegments("split", thinkingFrame, false, true, true, AUTO_SITES));
-    assert(!/think /.test(previewText), "preview withholds think while still thinking (got '" + previewText + "')");
-  }
+  // merged shows one stage at a time: in while preflighting, out once answering.
+  const mergedIn = segText("merged", frameOf({ stage: "in", values: { in: 900, out: 0 } }), true, true);
+  assert(mergedIn === "in 900 token", "merged in stage shows only the input figure (got '" + mergedIn + "')");
+  const mergedOut = segText("merged", frameOf({ stage: "out", values: { in: 900, out: 200 } }), true, true);
+  assert(mergedOut === "out 200 token", "merged out stage shows only the output figure (got '" + mergedOut + "')");
+  const mergedNoOut = segText("merged", frameOf({ stage: "out", values: { in: 900, out: 200 } }), true, false);
+  assert(mergedNoOut === "", "merged out stage prints nothing when showOutput is off (got '" + mergedNoOut + "')");
 
   // no hover -> static idle frame with the full fake figures (auto-scaled:
-  // 1866 -> 1.9K, 212 stays raw, 348 stays raw). merged idles on its LAST stage.
-  const idle = segText("split", P.idleFrame(true, true, true), true, true, true);
-  assert(idle === "in 1.9K token · out 348 token · think 212 token", "idle card shows complete fake counts under auto units (got '" + idle + "')");
-  const idleMerged = segText("merged", P.idleFrame(true, true, true), true, true, true);
-  assert(idleMerged === "out 348 token · think 212 token", "idle merged card parks on the final (answering) stage (got '" + idleMerged + "')");
+  // 1866 -> 1.9K, 348 stays raw). merged idles on its LAST stage.
+  const idle = segText("split", P.idleFrame(true, true), true, true);
+  assert(idle === "in 1.9K token · out 348 token", "idle card shows complete fake counts under auto units (got '" + idle + "')");
+  const idleMerged = segText("merged", P.idleFrame(true, true), true, true);
+  assert(idleMerged === "out 348 token", "idle merged card parks on the final (answering) stage (got '" + idleMerged + "')");
 
   // a FIXED unit applies to its site only, and carries into the preview.
-  const fixedIn = segText("split", frameOf({ values: { in: P.FAKE_IN, think: 0, out: P.FAKE_OUT } }), true, true, false, {
+  const fixedIn = segText("split", frameOf({ values: { in: P.FAKE_IN, out: P.FAKE_OUT } }), true, true, {
     input: { unit: "K", font: 0, color: "" },
     output: { unit: "auto", font: 0, color: "" },
-    think: { unit: "auto", font: 0, color: "" },
     perOp: { unit: "auto", font: 0, color: "" },
   });
   assert(fixedIn === "in 1.9K token · out 348 token", "fixed K unit formats only the in site (got '" + fixedIn + "')");
-  const fixedM = segText("split", frameOf({ values: { in: P.FAKE_IN, think: 0, out: P.FAKE_OUT } }), true, true, false, {
+  const fixedM = segText("split", frameOf({ values: { in: P.FAKE_IN, out: P.FAKE_OUT } }), true, true, {
     input: { unit: "M", font: 0, color: "" },
     output: { unit: "auto", font: 0, color: "" },
-    think: { unit: "auto", font: 0, color: "" },
     perOp: { unit: "auto", font: 0, color: "" },
   });
   assert(fixedM === "in 0M token · out 348 token", "fixed M on a small number rounds to 0M (the user chose the unit) (got '" + fixedM + "')");
-  const fixedThink = segText("split", frameOf({ stage: "out", values: { in: 0, think: P.FAKE_THINK, out: 0 } }), false, false, true, {
-    input: { unit: "auto", font: 0, color: "" },
-    output: { unit: "auto", font: 0, color: "" },
-    think: { unit: "K", font: 0, color: "" },
-    perOp: { unit: "auto", font: 0, color: "" },
-  });
-  assert(fixedThink === "think 0.2K token", "the think site has its own unit lock (got '" + fixedThink + "')");
 
   // segments carry per-site style for the renderer to attach.
-  const styled = P.badgeSegments("split", frameOf({ values: { in: 100, think: 0, out: 200 } }), true, true, false, {
+  const styled = P.badgeSegments("split", frameOf({ values: { in: 100, out: 200 } }), true, true, {
     input: { unit: "auto", font: 16, color: "#ff0000" },
     output: { unit: "auto", font: 0, color: "" },
-    think: { unit: "auto", font: 0, color: "" },
     perOp: { unit: "auto", font: 0, color: "" },
   });
   assert(styled[0].font === 16 && styled[0].color === "#ff0000", "in segment carries its site's font/color");
   assert(styled[1].font === 0 && styled[1].color === "", "out segment keeps the inherited style");
-  const styledThink = P.badgeSegments("split", frameOf({ stage: "out", values: { in: 0, think: 30, out: 200 } }), false, true, true, {
-    input: { unit: "auto", font: 0, color: "" },
-    output: { unit: "auto", font: 0, color: "" },
-    think: { unit: "auto", font: 18, color: "#00ff00" },
-    perOp: { unit: "auto", font: 0, color: "" },
-  });
-  assert(styledThink[0].kind === "out" && styledThink[1].kind === "think", "split emits out before think");
-  assert(styledThink[1].font === 18 && styledThink[1].color === "#00ff00",
-    "the think segment carries ITS site's font/color, not the output site's");
-  assert(styledThink[0].font === 0 && styledThink[0].color === "", "the out segment keeps the output site's style");
 
-  assert(P.startFrame(false, false, false) === null, "all switches off -> nothing to animate");
-  assert(P.startFrame(false, false, true) !== null, "think alone is enough to animate a card");
+  assert(P.startFrame(false, false) === null, "all switches off -> nothing to animate");
+  assert(P.startFrame(false, true) !== null, "out alone is enough to animate a card");
 
   // ── unit formatting itself ──
   const F = mod.tokens.format;
@@ -1328,8 +1203,8 @@ const P = mod.preview;
   // shimmer layers, and the op row is present.
   let rendered = draw(baseProps);
   let badge = findBadge(rendered);
-  assert(badge && badgeTextOf(badge) === "out " + P.FAKE_OUT + " token · think " + P.FAKE_THINK + " token",
-    "mounted idle card shows the answering state (out with its think share) (got '" + badgeTextOf(badge) + "')");
+  assert(badge && badgeTextOf(badge) === "out " + P.FAKE_OUT + " token",
+    "mounted idle card shows the answering state (got '" + badgeTextOf(badge) + "')");
   assert(badge.props["data-dtc-live"] === "false", "idle card is not live");
   assert(findOpRow(rendered) !== null, "mounted card includes the use-token operation row");
 
@@ -1378,7 +1253,7 @@ const P = mod.preview;
   rendered.props.onMouseLeave();
   rendered = draw(beforeProps);
   badge = findBadge(rendered);
-  assert(badge.props["data-dtc-live"] === "false" && badgeTextOf(badge) === "out " + P.FAKE_OUT + " token · think " + P.FAKE_THINK + " token",
+  assert(badge.props["data-dtc-live"] === "false" && badgeTextOf(badge) === "out " + P.FAKE_OUT + " token",
     "leaving returns to the static idle figure");
 
   // Keyboard activation prevents default (space would otherwise scroll) and
@@ -1409,6 +1284,22 @@ const P = mod.preview;
   assert(badge.props["data-dtc-live"] === "false", "disabled card never animates on hover");
   runner2.unmount();
   activeHooks = null;
+
+  // The preview's own overflow regression: in split mode the badge text is
+  // wider than the remaining space on the think row. The badge is a flex item
+  // with min-width:0, so it compresses — but its nowrap segments cannot shrink
+  // with it, and the text then paints past the card border onto the dark
+  // settings background, where the border cut reads as a second copy of the
+  // counter (the tail of "…out 348 token" printed twice). Two CSS defences are
+  // asserted: the row lets the badge wrap onto its own line, and the bubble
+  // clips whatever still does not fit.
+  {
+    const css = styleStore.get("dsh-where-did-my-tokens-go-style").textContent;
+    assert(css.includes(".dtc-thinkRow{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;line-height:18px;color:#2563eb;min-width:0;}"),
+      "think row wraps the badge instead of compressing it into sideways overflow");
+    assert(css.includes(".dtc-chat{display:flex;flex-direction:column;gap:0;border-radius:8px;background:#f6f8fa;border:1px solid #e5e9ef;padding:10px 12px;min-width:0;overflow:hidden;}"),
+      "mini bubble clips its content (nothing escapes onto the panel background)");
+  }
 }
 
 const summaryEl = renderCard(sectionEntry, { view: "summary" });
@@ -1474,10 +1365,10 @@ assert(summaryEl.type === "p" && childrenOf(summaryEl) === "description", "summa
 
     // Every option the client reads must exist in the host schema.
     const CLIENT_FIELDS = [
-      "displayMode", "showInput", "showOutput", "showThink", "showPerOp",
-      "inputUnit", "outputUnit", "thinkUnit", "perOpUnit",
-      "inputFont", "outputFont", "thinkFont", "perOpFont",
-      "inputColor", "outputColor", "thinkColor", "perOpColor",
+      "displayMode", "showInput", "showOutput", "showPerOp",
+      "inputUnit", "outputUnit", "perOpUnit",
+      "inputFont", "outputFont", "perOpFont",
+      "inputColor", "outputColor", "perOpColor",
     ];
     const missing = CLIENT_FIELDS.filter((f) => !fields.includes(f));
     assert(missing.length === 0, "host Config declares every option the client reads (missing: " + (missing.join(",") || "none") + ")");
@@ -1492,15 +1383,15 @@ assert(summaryEl.type === "p" && childrenOf(summaryEl) === "description", "summa
     try { Config({ inputUnit: "Z" }); } catch (e) { badUnitRejected = true; }
     assert(badUnitRejected, "host rejects a unit outside auto/K/M/G/T");
     let goodAccepted = true;
-    try { Config({ inputUnit: "M", thinkUnit: "G", showThink: false, thinkFont: 12, thinkColor: "#fff" }); } catch (e) { goodAccepted = false; }
-    assert(goodAccepted, "host accepts the think site's own unit/font/color options");
+    try { Config({ inputUnit: "M", perOpUnit: "G", showPerOp: false, perOpFont: 12, perOpColor: "#fff" }); } catch (e) { goodAccepted = false; }
+    assert(goodAccepted, "host accepts each site's own unit/font/color options");
 
     // The defaults the client's fallback mirrors must agree with the schema's.
     const d = (f) => (dict[f] && dict[f].meta ? dict[f].meta.default : undefined);
-    assert(d("displayMode") === "merged" && d("showThink") === true && d("showInput") === true && d("showPerOp") === true,
+    assert(d("displayMode") === "merged" && d("showInput") === true && d("showOutput") === true && d("showPerOp") === true,
       "host defaults match the client's fallback for the mode/switch options");
-    assert(d("thinkUnit") === "auto" && d("thinkFont") === 0 && d("thinkColor") === "",
-      "host defaults match the client's fallback for the think site's styling");
+    assert(d("inputUnit") === "auto" && d("inputFont") === 0 && d("inputColor") === "",
+      "host defaults match the client's fallback for a site's styling");
     }
   }
 }

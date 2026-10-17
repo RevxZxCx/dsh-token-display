@@ -44,7 +44,7 @@ console.log("no segmented control (1.4.0):", !text.includes("SegmentedControl"))
 console.log("unit formatting (1.5.0):", text.includes("formatTokens") && text.includes("UNIT_SCALES"));
 console.log("gear panels (1.5.0):", text.includes("GearPanel") && text.includes("dtc-gearPanel"));
 console.log("badge segments (1.5.0):", text.includes("buildBadgeSegments") && text.includes("fillBadge"));
-console.log("reasoning split (1.6.2):", text.includes("reasoningTokens") && text.includes("estimateReason"));
-console.log("think site + switch (1.6.2):", text.includes("thinkUnit") && text.includes("showThink"));
-console.log("think stage in preview (1.6.2):", text.includes("FAKE_THINK") && text.includes("previewStages"));
+console.log("reasoning text counts into out (1.7.0):", text.includes("reasoning-delta") && !text.includes("estimateReason"));
+console.log("no think figure (1.7.0):", !text.includes("thinkUnit") && !text.includes("showThink") && !text.includes("FAKE_THINK"));
+console.log("preview stages in/out only (1.7.0):", text.includes("previewStages") && !text.includes("FAKE_THINK"));
 console.log("id line:", text.match(/id: "([^"]+)"/)?.[0]);
